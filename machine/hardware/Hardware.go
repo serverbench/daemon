@@ -41,9 +41,12 @@ func GetHardware(cli *client.Client) (hardware *Hardware, err error) {
 	if err != nil {
 		return hardware, err
 	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		return hardware, err
+	hostname := os.Getenv("HOSTNAME")
+	if hostname == "" {
+		hostname, err = os.Hostname()
+		if err != nil {
+			return hardware, err
+		}
 	}
 	hardware = &Hardware{
 		CPUs:       cpus,
