@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Check if Docker is already installed
-if ! command -v docker &> /dev/null; then
-    echo "Docker not found, installing..."
-    curl -fsSL https://get.docker.com | sh
+# More reliable check for Docker - actually try to use it
+if docker info &>/dev/null; then
+    echo "Docker is already installed and working, skipping installation"
 else
-    echo "Docker is already installed, skipping installation"
+    echo "Docker not found or not working, installing..."
+    curl -fsSL https://get.docker.com | sh
 fi
 
 # Run daemon - ignore errors from docker rm
