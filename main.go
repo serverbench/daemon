@@ -1,11 +1,22 @@
 package main
 
 import (
-	"supervisor/machine"
+	docker "github.com/docker/docker/client"
+	"supervisor/client"
 )
 
-var m = machine.Machine{}
-
 func main() {
-	Execute()
+	cli, err := docker.NewClientWithOpts(
+		docker.FromEnv,
+		docker.WithVersion("1.48"),
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer cli.Close()
+	serverbench := client.Client{}
+	err = serverbench.Start(cli)
+	if err != nil {
+		panic(err)
+	}
 }
