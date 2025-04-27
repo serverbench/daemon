@@ -1,16 +1,16 @@
-# Check if Docker is installed, if not, install it
-if ! docker --version &> /dev/null
-then
+#!/bin/bash
+
+# Check if Docker is already installed
+if ! command -v docker &> /dev/null; then
     echo "Docker not found, installing..."
     curl -fsSL https://get.docker.com | sh
 else
-    echo "Docker is already installed."
+    echo "Docker is already installed, skipping installation"
 fi
 
-# Remove any existing container, ignore errors
-docker rm -f serverbench || true
-
-# Run the Docker container
+# Run daemon - ignore errors from docker rm
+echo "Setting up serverbench container..."
+docker rm -f serverbench 2>/dev/null || true
 docker run \
   --privileged \
   --name serverbench \
