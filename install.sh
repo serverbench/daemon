@@ -1,5 +1,5 @@
 # Check if Docker is installed, if not, install it
-if ! command -v docker &> /dev/null
+if ! docker --version &> /dev/null
 then
     echo "Docker not found, installing..."
     curl -fsSL https://get.docker.com | sh
