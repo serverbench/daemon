@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# More reliable check for Docker - actually try to use it
-if docker info &>/dev/null; then
+# Check if Docker command exists first, to avoid script failure
+if command -v docker &>/dev/null && docker info &>/dev/null; then
     echo "Docker is already installed and working, skipping installation"
 else
     echo "Docker not found or not working, installing..."
