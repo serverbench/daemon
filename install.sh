@@ -1,14 +1,24 @@
-# install docker
-curl -fsSL https://get.docker.com | sh
+# Check if Docker is installed, if not, install it
+if ! command -v docker &> /dev/null
+then
+    echo "Docker not found, installing..."
+    curl -fsSL https://get.docker.com | sh
+else
+    echo "Docker is already installed."
+fi
 
-# run daemon
+# Remove any existing container, ignore errors
+docker rm -f serverbench || true
+
+# Run the Docker container
 docker run \
   --privileged \
   --name serverbench \
   --restart=always \
+  --pull=always \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v ./test/containers:/containers \
-  -v ./test/keys:/keys \
+  -v ./containers:/containers \
+  -v ./keys:/keys \
   -e KEY="$1" \
   -e HOSTNAME="$(hostname)" \
   --pid=host \
