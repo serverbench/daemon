@@ -9,6 +9,8 @@ import (
 	gonanoid "github.com/matoous/go-nanoid/v2"
 	log "github.com/sirupsen/logrus"
 	"net/url"
+	"os"
+	"supervisor/client/action"
 	"supervisor/client/proto"
 	"supervisor/machine"
 	"supervisor/machine/hardware"
@@ -86,12 +88,16 @@ func (c *Client) handshake() (err error) {
 		return err
 	}
 	c.Id = &session.Machine.Id
+	return c.sendHardware()
+}
+
+func (c *Client) sendHardware() (err error) {
 	hw, err := hardware.GetHardware(c.Cli)
 	if err != nil {
 		log.Fatal(err)
 		return err
 	}
-	err = c.SendAndWait(*c.Id+".update", map[string]interface{}{
+	err = c.MachineSendAndWait("update", map[string]interface{}{
 		"hardware": hw,
 	}, proto.Reply{})
 	if err != nil {
@@ -99,6 +105,10 @@ func (c *Client) handshake() (err error) {
 		return err
 	}
 	return nil
+}
+
+func (c *Client) MachineSendAndWait(action string, data map[string]interface{}, result any) (err error) {
+	return c.SendAndWait(*c.Id+"."+action, data, result)
 }
 
 func (c *Client) Start(cli *client.Client) (err error) {
@@ -109,8 +119,16 @@ func (c *Client) Start(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
-
-	u := url.URL{Scheme: "wss", Host: "stream.beta.serverbench.io", Path: "/", RawQuery: "key=" + c.Machine.Key}
+	endpoint := os.Getenv("ENDPOINT")
+	if endpoint == "" {
+		endpoint = "wss://stream.beta.serverbench.io"
+	}
+	endpoint = endpoint + "/?key=" + c.Machine.Key
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		log.Error("error parsing endpoint url")
+		return err
+	}
 	log.Info(fmt.Sprintf("connecting to %s", u.String()))
 	c.Conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
@@ -173,9 +191,45 @@ func (c *Client) Start(cli *client.Client) (err error) {
 	if err := c.handshake(); err != nil {
 		return err
 	}
+	// Request queued actions and listen for new ones
+	if err := c.actions(); err != nil {
+		return err
+	}
 
 	// Wait for the done channel to be closed (when the reader exits)
 	<-done
+
+	return nil
+}
+func (c *Client) actions() error {
+	var result proto.Reply
+	if err := c.MachineSendAndWait("actions", map[string]interface{}{}, &result); err != nil {
+		return err
+	}
+
+	// Marshal the generic result into bytes so we can unmarshal into []json.RawMessage
+	data, err := json.Marshal(result.Result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	var rawMessages []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessages); err != nil {
+		return fmt.Errorf("failed to unmarshal result into raw actions: %w", err)
+	}
+
+	for _, raw := range rawMessages {
+		var a action.Action
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return fmt.Errorf("failed to unmarshal action header: %w", err)
+		}
+		a.Ref = raw
+		actionErr := a.Process(c.Cli)
+		if actionErr != nil {
+			a.Ref = nil
+			log.Error("error processing action", a, actionErr)
+		}
+	}
 
 	return nil
 }
