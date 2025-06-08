@@ -90,7 +90,7 @@ func (c Container) pullImage(cli *client.Client) (err error) {
 
 func (c Container) createContainer(cli *client.Client) (err error) {
 	_, fetchErr := c.cId(cli)
-	if fetchErr != nil {
+	if fetchErr == nil {
 		err = c.Stop(cli)
 		if err != nil {
 			return err
