@@ -64,7 +64,7 @@ func GetInterfaces(si sysinfo.SysInfo) (interfaces []Interface, err error) {
 	if len(interfaces) == 0 && strings.ToLower(os.Getenv("TEST_ETH0")) == "true" {
 		interfaces = append(interfaces, Interface{
 			Addresses: []Address{{
-				Ip:      "1.1.1.1/32",
+				Ip:      "0.0.0.0/32",
 				Version: "IPv4",
 			}},
 			Speed: 1,

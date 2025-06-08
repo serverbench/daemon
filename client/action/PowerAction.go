@@ -24,27 +24,27 @@ func (a *PowerAction) Process(cli *client.Client) error {
 	switch a.Type {
 	case Start:
 		{
-
+			return a.Container.Start(cli)
 		}
 	case Stop:
 		{
-
+			return a.Container.Stop(cli)
 		}
 	case Restart:
 		{
-
+			return a.Container.Restart(cli)
 		}
 	case Pause:
 		{
-
+			return a.Container.Pause(cli)
 		}
 	case Unpause:
 		{
-
+			return a.Container.Unpause(cli)
 		}
 	case Kill:
 		{
-
+			return a.Container.Kill(cli)
 		}
 	default:
 		{

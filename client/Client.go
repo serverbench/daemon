@@ -73,9 +73,30 @@ func (c *Client) SendAndWait(action string, data map[string]interface{}, result 
 	}
 }
 
-func (c *Client) handleMessage(msg proto.Msg) {
-	log.Infof("Handling action %s with params %+v", msg.Action, msg.Params)
+func (c *Client) handleMessage(msg proto.Incoming) error {
 	// You can switch on msg.Action here if you want
+	switch *msg.Realm {
+	case "machine":
+		{
+			switch *msg.Action {
+			case "containers":
+				{
+					return c.containers()
+				}
+			}
+		}
+	}
+	return errors.New("unknown message: ")
+}
+
+func (c *Client) containers() (err error) {
+	updatedContainers := make([]containers.Container, 0)
+	err = c.MachineSendAndWait("containers", map[string]interface{}{}, &updatedContainers)
+	if err != nil {
+		return err
+	}
+
+	return c.Machine.UpdateContainers(c.Cli, updatedContainers)
 }
 
 func (c *Client) handshake() (err error) {
@@ -90,7 +111,17 @@ func (c *Client) handshake() (err error) {
 	}
 	c.Id = &session.Machine.Id
 	log.Info("Connected with session id " + *c.Id)
-	return c.sendHardware()
+	err = c.sendHardware()
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	err = c.containers()
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	return err
 }
 
 func (c *Client) sendHardware() (err error) {
@@ -161,12 +192,12 @@ func (c *Client) Start(cli *client.Client) (err error) {
 				continue
 			}
 			if incoming.Action != nil {
-				var msg proto.Msg
-				if err := json.Unmarshal(message, &msg); err != nil {
-					log.Println("failed to decode message:", err)
-					continue
-				}
-				go c.handleMessage(msg)
+				go func() {
+					err := c.handleMessage(incoming)
+					if err != nil {
+						log.Error("error handling message:", err)
+					}
+				}()
 			} else {
 				var reply proto.Reply
 				if err := json.Unmarshal(message, &reply); err != nil {

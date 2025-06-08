@@ -19,25 +19,10 @@ type ManagementAction struct {
 }
 
 func (a *ManagementAction) Process(cli *client.Client) error {
-	ports := []containers.Port{}
 	switch a.Action {
-	case Create:
-		{
-			return a.Container.Create(
-				cli,
-				ports,
-			)
-		}
 	case Update:
 		{
 			return a.Container.Update(
-				cli,
-				ports,
-			)
-		}
-	case Delete:
-		{
-			return a.Container.Destroy(
 				cli,
 			)
 		}

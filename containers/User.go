@@ -1,6 +1,7 @@
 package containers
 
 import (
+	"errors"
 	"fmt"
 	pass "github.com/sethvargo/go-password/password"
 	log "github.com/sirupsen/logrus"
@@ -60,9 +61,34 @@ func (c Container) createUser() (err error) {
 	return c.MountDir()
 }
 
-func (c Container) MountDir() error {
+func (c Container) userExists() (exists bool, err error) {
+	cmd := exec.Command("id", c.Id)
+	err = cmd.Run()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			// If the exit code is non-zero, the user does not exist
+			return false, nil
+		}
+		// An unexpected error occurred
+		return false, err
+	}
+	// Command succeeded, so the user exists
+	return true, nil
+}
+
+func (c Container) MountDir() (err error) {
 	log.Info("mounting data dir")
-	return exec.Command("mount", "--bind", c.Dir(), c.dataDir()).Run()
+	exists, err := c.userExists()
+	if err != nil {
+		return err
+	}
+	if !exists {
+		err = c.createUser()
+	} else {
+		return exec.Command("mount", "--bind", c.Dir(), c.dataDir()).Run()
+	}
+	return err
 }
 
 func (c Container) Unmount() error {

@@ -1,7 +1,7 @@
 package containers
 
-const Drop = "drop"
-const Accept = "accept"
+const Drop = "DROP"
+const Accept = "ACCEPT"
 
 type Port struct {
 	Port    int      `json:"port"`

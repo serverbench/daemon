@@ -25,7 +25,7 @@ type Container struct {
 	Image   string            `json:"image"`
 	Address string            `json:"address"`
 	Mount   string            `json:"mount"`
-	Env     map[string]string `json:"env"`
+	Envs    map[string]string `json:"envs"`
 	Ports   []Port            `json:"ports"`
 }
 
@@ -45,10 +45,6 @@ func (c Container) HostDir(cli *client.Client) (hostPath *string, err error) {
 // Create creates the user and spins up the container
 func (c Container) Create(cli *client.Client) (err error) {
 	err = c.createUser()
-	if err != nil {
-		return err
-	}
-	err = c.MountDir()
 	if err != nil {
 		return err
 	}
@@ -73,7 +69,7 @@ func (c Container) Update(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
-	return c.startContainer(cli)
+	return c.Start(cli)
 }
 
 func (c Container) pullImage(cli *client.Client) (err error) {
@@ -92,7 +88,18 @@ func (c Container) pullImage(cli *client.Client) (err error) {
 	return nil
 }
 
-func (c Container) createContainer(cli *client.Client) error {
+func (c Container) createContainer(cli *client.Client) (err error) {
+	_, fetchErr := c.cId(cli)
+	if fetchErr != nil {
+		err = c.Stop(cli)
+		if err != nil {
+			return err
+		}
+		err = c.deleteContainer(cli)
+		if err != nil {
+			return err
+		}
+	}
 	log.Info("creating container")
 	portBindings := nat.PortMap{}
 	exposedPorts := nat.PortSet{}
@@ -112,7 +119,7 @@ func (c Container) createContainer(cli *client.Client) error {
 	}
 
 	var env []string
-	for k, v := range c.Env {
+	for k, v := range c.Envs {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
@@ -142,7 +149,7 @@ func (c Container) createContainer(cli *client.Client) error {
 	return err
 }
 
-func (c Container) startContainer(cli *client.Client) (err error) {
+func (c Container) Start(cli *client.Client) (err error) {
 	log.Info("starting container")
 	ctx := context.Background()
 	cid, err := c.cId(cli)
@@ -150,6 +157,56 @@ func (c Container) startContainer(cli *client.Client) (err error) {
 		return err
 	}
 	return cli.ContainerStart(ctx, cid, container.StartOptions{})
+}
+
+func (c Container) Stop(cli *client.Client) (err error) {
+	log.Info("stopping container")
+	ctx := context.Background()
+	cid, err := c.cId(cli)
+	if err != nil {
+		return err
+	}
+	return cli.ContainerStop(ctx, cid, container.StopOptions{})
+}
+
+func (c Container) Restart(cli *client.Client) (err error) {
+	log.Info("restarting container")
+	ctx := context.Background()
+	cid, err := c.cId(cli)
+	if err != nil {
+		return err
+	}
+	return cli.ContainerRestart(ctx, cid, container.StopOptions{})
+}
+
+func (c Container) Pause(cli *client.Client) (err error) {
+	log.Info("pausing container")
+	ctx := context.Background()
+	cid, err := c.cId(cli)
+	if err != nil {
+		return err
+	}
+	return cli.ContainerPause(ctx, cid)
+}
+
+func (c Container) Unpause(cli *client.Client) (err error) {
+	log.Info("unpausing container")
+	ctx := context.Background()
+	cid, err := c.cId(cli)
+	if err != nil {
+		return err
+	}
+	return cli.ContainerUnpause(ctx, cid)
+}
+
+func (c Container) Kill(cli *client.Client) (err error) {
+	log.Info("killing container")
+	ctx := context.Background()
+	cid, err := c.cId(cli)
+	if err != nil {
+		return err
+	}
+	return cli.ContainerKill(ctx, cid, "SIGKILL")
 }
 
 func (c Container) deleteContainer(cli *client.Client) (err error) {
@@ -193,6 +250,10 @@ func (c Container) Destroy(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
+	err = c.deleteUser()
+	if err != nil {
+		return err
+	}
 	err = c.Clear()
 	if err != nil {
 		return err
@@ -202,10 +263,7 @@ func (c Container) Destroy(cli *client.Client) (err error) {
 		return err
 	}
 	err = firewall.Uninstall()
-	if err != nil {
-		return err
-	}
-	return c.deleteUser()
+	return err
 }
 
 func (c Container) Clear() error {
