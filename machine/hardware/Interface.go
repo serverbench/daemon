@@ -1,9 +1,12 @@
 package hardware
 
 import (
+	"errors"
 	"github.com/shirou/gopsutil/v4/net"
 	"github.com/zcalusic/sysinfo"
 	gnet "net"
+	"os"
+	"strings"
 )
 
 type Address struct {
@@ -28,9 +31,6 @@ func GetInterfaces(si sysinfo.SysInfo) (interfaces []Interface, err error) {
 		speedMap[iface.Name] = iface.Speed
 	}
 	for _, iface := range ifaces {
-		if iface.Name == "docker0" || iface.Name == "lo" {
-			continue
-		}
 		var addrs = make([]Address, 0)
 		for _, addr := range iface.Addrs {
 			ip, _, err := gnet.ParseCIDR(addr.Addr)
@@ -46,16 +46,33 @@ func GetInterfaces(si sysinfo.SysInfo) (interfaces []Interface, err error) {
 			} else {
 				version = "IPv6"
 			}
-			addrs = append(addrs, Address{
-				Ip:      addr.Addr,
-				Version: version,
+			if !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() {
+				addrs = append(addrs, Address{
+					Ip:      addr.Addr,
+					Version: version,
+				})
+			}
+		}
+		if len(addrs) > 0 {
+			interfaces = append(interfaces, Interface{
+				Addresses: addrs,
+				Name:      iface.Name,
+				Speed:     uint64(speedMap[iface.Name]),
 			})
 		}
+	}
+	if len(interfaces) == 0 && strings.ToLower(os.Getenv("TEST_ETH0")) == "true" {
 		interfaces = append(interfaces, Interface{
-			Addresses: addrs,
-			Name:      iface.Name,
-			Speed:     uint64(speedMap[iface.Name]),
+			Addresses: []Address{{
+				Ip:      "1.1.1.1/32",
+				Version: "IPv4",
+			}},
+			Speed: 1,
+			Name:  "eth0",
 		})
+	}
+	if len(interfaces) == 0 {
+		return nil, errors.New("no interfaces found. the device must be directly addressed using at least a public (non-private) IP")
 	}
 	return interfaces, err
 }
