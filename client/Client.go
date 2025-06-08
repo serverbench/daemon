@@ -12,6 +12,7 @@ import (
 	"os"
 	"supervisor/client/action"
 	"supervisor/client/proto"
+	"supervisor/containers"
 	"supervisor/machine"
 	"supervisor/machine/hardware"
 	"time"
@@ -88,6 +89,7 @@ func (c *Client) handshake() (err error) {
 		return err
 	}
 	c.Id = &session.Machine.Id
+	log.Info("Connected with session id " + *c.Id)
 	return c.sendHardware()
 }
 
@@ -104,11 +106,16 @@ func (c *Client) sendHardware() (err error) {
 		log.Fatal(err)
 		return err
 	}
+	log.Info("Updated hardware")
 	return nil
 }
 
 func (c *Client) MachineSendAndWait(action string, data map[string]interface{}, result any) (err error) {
 	return c.SendAndWait(*c.Id+"."+action, data, result)
+}
+
+func (c *Client) ContainerSendAndWait(container containers.Container, action string, data map[string]interface{}, result any) (err error) {
+	return c.MachineSendAndWait("container."+container.Id+"."+action, data, result)
 }
 
 func (c *Client) Start(cli *client.Client) (err error) {
@@ -123,13 +130,13 @@ func (c *Client) Start(cli *client.Client) (err error) {
 	if endpoint == "" {
 		endpoint = "wss://stream.beta.serverbench.io"
 	}
+	log.Info(fmt.Sprintf("Connecting to %s", endpoint))
 	endpoint = endpoint + "/?key=" + c.Machine.Key
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		log.Error("error parsing endpoint url")
 		return err
 	}
-	log.Info(fmt.Sprintf("connecting to %s", u.String()))
 	c.Conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		return err
@@ -202,20 +209,9 @@ func (c *Client) Start(cli *client.Client) (err error) {
 	return nil
 }
 func (c *Client) actions() error {
-	var result proto.Reply
-	if err := c.MachineSendAndWait("actions", map[string]interface{}{}, &result); err != nil {
-		return err
-	}
-
-	// Marshal the generic result into bytes so we can unmarshal into []json.RawMessage
-	data, err := json.Marshal(result.Result)
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-
 	var rawMessages []json.RawMessage
-	if err := json.Unmarshal(data, &rawMessages); err != nil {
-		return fmt.Errorf("failed to unmarshal result into raw actions: %w", err)
+	if err := c.MachineSendAndWait("actions", map[string]interface{}{}, &rawMessages); err != nil {
+		return err
 	}
 
 	for _, raw := range rawMessages {
@@ -224,10 +220,17 @@ func (c *Client) actions() error {
 			return fmt.Errorf("failed to unmarshal action header: %w", err)
 		}
 		a.Ref = raw
-		actionErr := a.Process(c.Cli)
+		update, actionErr := a.Process(c.Cli)
 		if actionErr != nil {
 			a.Ref = nil
 			log.Error("error processing action", a, actionErr)
+		}
+		if update != nil {
+			actionErr = c.ContainerSendAndWait(a.Container, update.Action, update.Params, &proto.Reply{})
+			if actionErr != nil {
+				a.Ref = nil
+				log.Error("error processing action trigger", a, actionErr)
+			}
 		}
 	}
 

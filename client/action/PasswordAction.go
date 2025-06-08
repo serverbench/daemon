@@ -1,6 +1,7 @@
 package action
 
 import (
+	"supervisor/client/proto"
 	"supervisor/containers"
 )
 
@@ -13,10 +14,16 @@ type PasswordAction struct {
 	Container containers.Container `json:"container"`
 }
 
-func (a *PasswordAction) Process() error {
-	_, err := a.Container.ResetPassword()
+func (a *PasswordAction) Process() (reply *proto.Msg, err error) {
+	password, err := a.Container.ResetPassword()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	msg := proto.Msg{
+		Action: Password,
+		Params: map[string]interface{}{
+			Password: password,
+		},
+	}
+	return &msg, err
 }
