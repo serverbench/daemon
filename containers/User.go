@@ -57,10 +57,10 @@ func (c Container) createUser() (err error) {
 		return err
 	}
 	// TODO implement quotas
-	return c.Mount()
+	return c.MountDir()
 }
 
-func (c Container) Mount() error {
+func (c Container) MountDir() error {
 	log.Info("mounting data dir")
 	return exec.Command("mount", "--bind", c.Dir(), c.dataDir()).Run()
 }

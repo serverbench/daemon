@@ -1,10 +1,10 @@
 package containers
 
-const Drop = "DROP"
-const Accept = "ACCEPT"
+const Drop = "drop"
+const Accept = "accept"
 
 type Port struct {
 	Port    int      `json:"port"`
-	Policy  string   `json:"policy"` // DROP or ACCEPT
+	Policy  string   `json:"policy"` // drop or accept
 	Remotes []string `json:"remotes"`
 }

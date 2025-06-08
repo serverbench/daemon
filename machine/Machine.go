@@ -4,13 +4,15 @@ import (
 	"errors"
 	"github.com/docker/docker/client"
 	"os"
+	"supervisor/containers"
 	"supervisor/machine/hardware"
 )
 
 type Machine struct {
-	Id       string            `json:"id"`
-	Hardware hardware.Hardware `json:"hardware"`
-	Key      string            `json:"key"`
+	Id         string               `json:"id"`
+	Hardware   hardware.Hardware    `json:"hardware"`
+	Key        string               `json:"key"`
+	Containers containers.Container `json:"containers"`
 }
 
 func GetMachine(cli *client.Client) (machine *Machine, err error) {
@@ -25,6 +27,7 @@ func GetMachine(cli *client.Client) (machine *Machine, err error) {
 	if err != nil {
 		return machine, err
 	}
+	// TODO list local containers
 	return &Machine{
 		Key:      key,
 		Hardware: *hw,

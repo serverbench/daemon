@@ -24,8 +24,9 @@ type Container struct {
 	Id      string            `json:"id"`
 	Image   string            `json:"image"`
 	Address string            `json:"address"`
-	Data    string            `json:"data"`
+	Mount   string            `json:"mount"`
 	Env     map[string]string `json:"env"`
+	Ports   []Port            `json:"ports"`
 }
 
 func (c Container) Dir() string {
@@ -42,21 +43,21 @@ func (c Container) HostDir(cli *client.Client) (hostPath *string, err error) {
 }
 
 // Create creates the user and spins up the container
-func (c Container) Create(cli *client.Client, ports []Port) (err error) {
+func (c Container) Create(cli *client.Client) (err error) {
 	err = c.createUser()
 	if err != nil {
 		return err
 	}
-	err = c.Mount()
+	err = c.MountDir()
 	if err != nil {
 		return err
 	}
-	return c.Update(cli, ports)
+	return c.Update(cli)
 }
 
 // Update applies the new firewall rules and creates (or updates) the container
-func (c Container) Update(cli *client.Client, ports []Port) (err error) {
-	firewall, err := c.firewall(ports)
+func (c Container) Update(cli *client.Client) (err error) {
+	firewall, err := c.firewall(c.Ports)
 	if err != nil {
 		return err
 	}
@@ -68,7 +69,7 @@ func (c Container) Update(cli *client.Client, ports []Port) (err error) {
 	if err != nil {
 		return err
 	}
-	err = c.createContainer(cli, ports)
+	err = c.createContainer(cli)
 	if err != nil {
 		return err
 	}
@@ -91,12 +92,12 @@ func (c Container) pullImage(cli *client.Client) (err error) {
 	return nil
 }
 
-func (c Container) createContainer(cli *client.Client, ports []Port) error {
+func (c Container) createContainer(cli *client.Client) error {
 	log.Info("creating container")
 	portBindings := nat.PortMap{}
 	exposedPorts := nat.PortSet{}
 
-	for _, p := range ports {
+	for _, p := range c.Ports {
 		for _, proto := range protocols {
 			portStr := fmt.Sprintf("%d/%s", p.Port, proto)
 			natPort := nat.Port(portStr)
@@ -130,7 +131,7 @@ func (c Container) createContainer(cli *client.Client, ports []Port) error {
 			{
 				Type:   mount.TypeBind,
 				Source: *hostPath,
-				Target: c.Data,
+				Target: c.Mount,
 			},
 		},
 	}

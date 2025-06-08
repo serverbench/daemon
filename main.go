@@ -8,7 +8,7 @@ import (
 func main() {
 	cli, err := docker.NewClientWithOpts(
 		docker.FromEnv,
-		docker.WithVersion("1.48"),
+		docker.WithVersion("1.47"),
 	)
 	if err != nil {
 		panic(err)
