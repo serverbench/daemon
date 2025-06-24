@@ -26,7 +26,7 @@ fi
 # Now run the serverbench container
 echo "Setting up serverbench container..."
 docker rm -f serverbench 2>/dev/null || true
-docker run \
+docker run -d \
   --privileged \
   --name serverbench \
   --restart=always \
@@ -39,3 +39,5 @@ docker run \
   --pid=host \
   --network=host \
   serverbench/daemon
+
+echo "serverbench installed"
