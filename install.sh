@@ -28,12 +28,14 @@ echo "Setting up serverbench container..."
 docker rm -f serverbench 2>/dev/null || true
 docker run -d \
   --privileged \
+  --cap-add=NET_ADMIN \
   --name serverbench \
   --restart=always \
   --pull=always \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v ./containers:/containers \
   -v ./keys:/keys \
+  -v /proc/1/ns/net:/mnt/host_netns \
   -e KEY="$1" \
   -e HOSTNAME="$(hostname)" \
   --pid=host \
