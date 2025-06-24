@@ -26,6 +26,8 @@ WORKDIR /app
 
 # Entrypoint script to init keys if needed
 COPY ./wrapper /wrapper
+RUN chmod +x /wrapper/iptables
+RUN chmod +x /wrapper/ip6tables
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
