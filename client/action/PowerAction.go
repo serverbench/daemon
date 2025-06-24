@@ -21,7 +21,7 @@ type PowerAction struct {
 }
 
 func (a *PowerAction) Process(cli *client.Client) error {
-	switch a.Type {
+	switch a.Power {
 	case Start:
 		{
 			return a.Container.Start(cli)

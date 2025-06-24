@@ -93,17 +93,17 @@ func (c Container) MountDir() (err error) {
 
 func (c Container) Unmount() error {
 	log.Info("unmounting data dir")
-	return exec.Command("umount", c.dataDir()).Run()
+	return exec.Command("umount", "-l", c.dataDir()).Run()
 }
 
 // deletes the user and their data, the container should be disposed beforehand
 func (c Container) deleteUser() (err error) {
-	err = c.Unmount()
+	log.Info("removing container directory")
+	err = exec.Command("rm", "-rf", c.Dir()).Run()
 	if err != nil {
 		return err
 	}
-	log.Info("removing container directory")
-	err = exec.Command("rm", "-rf", c.Dir()).Run()
+	err = c.Unmount()
 	if err != nil {
 		return err
 	}

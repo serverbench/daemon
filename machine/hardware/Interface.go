@@ -61,7 +61,7 @@ func GetInterfaces(si sysinfo.SysInfo) (interfaces []Interface, err error) {
 			})
 		}
 	}
-	if len(interfaces) == 0 && strings.ToLower(os.Getenv("TEST_ETH0")) == "true" {
+	if strings.ToLower(os.Getenv("TEST_ETH0")) == "true" {
 		interfaces = append(interfaces, Interface{
 			Addresses: []Address{{
 				Ip:      "0.0.0.0/32",

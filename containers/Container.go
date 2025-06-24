@@ -1,10 +1,12 @@
 package containers
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -15,7 +17,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"supervisor/client/proto/pipe"
 	"supervisor/machine/hardware"
+	"time"
 )
 
 var unknownContainer = errors.New("unknown container")
@@ -27,6 +32,144 @@ type Container struct {
 	Mount   string            `json:"mount"`
 	Envs    map[string]string `json:"envs"`
 	Ports   []Port            `json:"ports"`
+}
+
+func (c Container) PipeLogs(ctx context.Context, cli *client.Client, since int64, until int64, limit int64, listener *pipe.Pipe) (err error) {
+	sinceStr := ""
+	untilStr := ""
+	follow := false
+	if until > 0 {
+		untilStr = time.Unix(until/1000, (until%1000)*1e6).UTC().Format(time.RFC3339)
+	}
+	if since > 0 {
+		sinceStr = time.Unix(since/1000, (since%1000)*1e6).UTC().Format(time.RFC3339)
+	}
+	if until <= 0 {
+		follow = true
+	}
+
+	cid, err := c.cId(cli)
+	if err != nil {
+		return err
+	}
+	reader, err := cli.ContainerLogs(ctx, cid, container.LogsOptions{
+		Follow:     follow,
+		Since:      sinceStr,
+		Until:      untilStr,
+		ShowStderr: true,
+		ShowStdout: true,
+		Timestamps: true,
+	})
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	processed := int64(0)
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) < 8 {
+			continue // malformed frame
+		}
+		line = line[8:] // strip Docker's log header
+
+		logLine := string(line)
+
+		parts := strings.SplitN(logLine, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		timestampStr, content := parts[0], parts[1]
+		timestamp, err := time.Parse(time.RFC3339Nano, timestampStr)
+		if err != nil {
+			continue
+		}
+		listener.Forward <- listener.Package(pipe.Log{
+			Timestamp: timestamp.UnixMilli(),
+			Content:   content,
+			End:       false,
+		})
+		processed++
+		if limit > 0 && processed >= limit {
+			log.Info("cancelled")
+			listener.Cancel()
+			break
+		}
+	}
+
+	// If not following, or once the reader ends, send a closing log
+	listener.End()
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c Container) PipeStatus(ctx context.Context, cli *client.Client, listener *pipe.Pipe) error {
+	cid, err := c.cId(cli)
+	if err != nil {
+		return err
+	}
+	// Step 1: Send initial status using ContainerInspect
+	containerJSON, err := cli.ContainerInspect(ctx, cid)
+	if err != nil {
+		return err
+	}
+
+	initial := pipe.Status{
+		Status: containerJSON.State.Status,
+	}
+
+	select {
+	case listener.Forward <- listener.Package(initial):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Step 2: Set up event filter and follow event stream
+	filterArgs := filters.NewArgs()
+	filterArgs.Add("type", "container")
+	filterArgs.Add("container", cid)
+
+	eventChan, errChan := cli.Events(ctx, events.ListOptions{
+		Filters: filterArgs,
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case err := <-errChan:
+			if err != nil {
+				return err
+			}
+			return nil // closed without error
+
+		case event := <-eventChan:
+			if event.Type != "container" || event.Action == "" {
+				continue
+			}
+
+			normalized, ok := pipe.NormalizeDockerStatus[event.Action]
+			if !ok {
+				continue
+			}
+
+			s := pipe.Status{
+				Status: normalized,
+			}
+
+			select {
+			case listener.Forward <- listener.Package(s):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
 }
 
 func (c Container) Dir() string {
@@ -53,11 +196,7 @@ func (c Container) Create(cli *client.Client) (err error) {
 
 // Update applies the new firewall rules and creates (or updates) the container
 func (c Container) Update(cli *client.Client) (err error) {
-	firewall, err := c.firewall(c.Ports)
-	if err != nil {
-		return err
-	}
-	err = firewall.Install()
+	err = c.InstallFirewall()
 	if err != nil {
 		return err
 	}
@@ -70,6 +209,15 @@ func (c Container) Update(cli *client.Client) (err error) {
 		return err
 	}
 	return c.Start(cli)
+}
+
+func (c Container) InstallFirewall() (err error) {
+	firewall, err := c.firewall(c.Ports)
+	if err != nil {
+		return err
+	}
+	err = firewall.Install()
+	return err
 }
 
 func (c Container) pullImage(cli *client.Client) (err error) {

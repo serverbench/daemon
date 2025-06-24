@@ -92,11 +92,13 @@ func GetMachine(cli *client.Client) (machine *Machine, err error) {
 func (m *Machine) UpdateContainers(cli *client.Client, newContainers []containers.Container) (err error) {
 	toBeCreated := make([]containers.Container, 0)
 	toBeDeleted := make(map[string]containers.Container)
+	existing := make([]containers.Container, 0)
 	for _, c := range m.Containers {
 		toBeDeleted[c.Id] = c
 	}
 	for _, provided := range newContainers {
 		if _, exists := toBeDeleted[provided.Id]; exists {
+			existing = append(existing, provided)
 			delete(toBeDeleted, provided.Id)
 		} else {
 			toBeCreated = append(toBeCreated, provided)
@@ -110,6 +112,12 @@ func (m *Machine) UpdateContainers(cli *client.Client, newContainers []container
 	}
 	for _, createdContainer := range toBeCreated {
 		err = createdContainer.Create(cli)
+		if err != nil {
+			return err
+		}
+	}
+	for _, existingContainer := range existing {
+		err = existingContainer.InstallFirewall()
 		if err != nil {
 			return err
 		}

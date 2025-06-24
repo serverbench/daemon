@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,19 +13,27 @@ import (
 	"os"
 	"supervisor/client/action"
 	"supervisor/client/proto"
+	"supervisor/client/proto/pipe"
 	"supervisor/containers"
 	"supervisor/machine"
 	"supervisor/machine/hardware"
 	"time"
 )
 
+type ListenerContext struct {
+	context context.Context
+	cancel  context.CancelFunc
+}
+
 type Client struct {
-	SendChan  chan proto.Msg
-	Id        *string
-	Conn      *websocket.Conn
-	Cli       *client.Client
-	Machine   *machine.Machine
-	callbacks map[string]chan proto.Reply
+	SendChan    chan proto.Msg
+	ForwardChan chan pipe.Forward
+	Id          *string
+	Conn        *websocket.Conn
+	Cli         *client.Client
+	Machine     *machine.Machine
+	callbacks   map[string]chan proto.Reply
+	pipes       map[string]pipe.Pipe
 }
 
 const responseTimeout = time.Second * 5
@@ -83,10 +92,66 @@ func (c *Client) handleMessage(msg proto.Incoming) error {
 				{
 					return c.containers()
 				}
+			case "actions":
+				{
+					return c.actions()
+				}
 			}
 		}
 	}
-	return errors.New("unknown message: ")
+	return errors.New("unknown message")
+}
+
+func (c *Client) handleListener(listener pipe.Pipe) (err error) {
+	log.Info("handling listener")
+	var selectedContainer *containers.Container = nil
+	jsonData, err := json.Marshal(listener.Filter)
+	genericFilter := pipe.GenericFilter{}
+	err = json.Unmarshal(jsonData, &genericFilter)
+	if err == nil {
+		for _, container := range c.Machine.Containers {
+			if container.Id == genericFilter.Container {
+				selectedContainer = &container
+				break
+			}
+		}
+	}
+	if selectedContainer != nil {
+		switch listener.Event {
+		case pipe.EventStatus:
+			err = selectedContainer.PipeStatus(listener.Context, c.Cli, &listener)
+			break
+		case pipe.EventLog:
+			logFilter := pipe.LogFilter{}
+			err = json.Unmarshal(jsonData, &logFilter)
+			if err != nil {
+				err = errors.New("unknown log filter")
+			} else {
+				err = selectedContainer.PipeLogs(listener.Context, c.Cli, logFilter.Since, logFilter.Until, logFilter.Limit, &listener)
+			}
+		case pipe.EventPassword:
+			password, err := selectedContainer.ResetPassword()
+			if err == nil {
+				listener.Forward <- listener.Package(pipe.Password{
+					Password: password,
+				})
+				listener.End()
+			}
+		}
+
+	} else {
+		err = errors.New("container not found")
+	}
+	if err != nil {
+		log.Error(err)
+		listener.End()
+		return err
+	}
+	select {
+	case <-listener.Delete:
+		delete(c.pipes, listener.Lid)
+	}
+	return nil
 }
 
 func (c *Client) containers() (err error) {
@@ -95,7 +160,6 @@ func (c *Client) containers() (err error) {
 	if err != nil {
 		return err
 	}
-
 	return c.Machine.UpdateContainers(c.Cli, updatedContainers)
 }
 
@@ -151,6 +215,8 @@ func (c *Client) ContainerSendAndWait(container containers.Container, action str
 
 func (c *Client) Start(cli *client.Client) (err error) {
 	c.Cli = cli
+	c.pipes = make(map[string]pipe.Pipe)
+	c.ForwardChan = make(chan pipe.Forward, 100)
 	c.SendChan = make(chan proto.Msg, 100)
 	c.callbacks = make(map[string]chan proto.Reply)
 	c.Machine, err = machine.GetMachine(cli)
@@ -188,7 +254,7 @@ func (c *Client) Start(cli *client.Client) (err error) {
 			}
 			var incoming proto.Incoming
 			if err := json.Unmarshal(message, &incoming); err != nil {
-				log.Println("failed to decode incoming:", err)
+				log.Error("failed to decode incoming:", err)
 				continue
 			}
 			if incoming.Action != nil {
@@ -196,6 +262,39 @@ func (c *Client) Start(cli *client.Client) (err error) {
 					err := c.handleMessage(incoming)
 					if err != nil {
 						log.Error("error handling message:", err)
+					}
+				}()
+			} else if incoming.Lid != nil {
+				if incoming.Close != nil && *incoming.Close == true {
+					existing, ok := c.pipes[*incoming.Lid]
+					if ok {
+						existing.End()
+					} else {
+						err = errors.New("unknown lid")
+						log.Error("error while closing listener:", err)
+						continue
+					}
+				}
+				var listener pipe.BasicPipe
+				if err := json.Unmarshal(message, &listener); err != nil {
+					log.Error("failed to decode listener:", err)
+					continue
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				completeListener := pipe.Pipe{
+					Lid:     listener.Lid,
+					Delete:  make(chan struct{}, 1),
+					Cancel:  cancel,
+					Context: ctx,
+					Forward: c.ForwardChan,
+					Event:   listener.Event,
+					Filter:  listener.Filter,
+				}
+				c.pipes[completeListener.Lid] = completeListener
+				go func() {
+					err := c.handleListener(completeListener)
+					if err != nil {
+						log.Error("error handling listener:", err)
 					}
 				}()
 			} else {
@@ -217,6 +316,16 @@ func (c *Client) Start(cli *client.Client) (err error) {
 	// Writer goroutine
 	go func() {
 		for msg := range c.SendChan {
+			err := c.Conn.WriteJSON(msg)
+			if err != nil {
+				log.Println("write:", err)
+				return
+			}
+		}
+	}()
+
+	go func() {
+		for msg := range c.ForwardChan {
 			err := c.Conn.WriteJSON(msg)
 			if err != nil {
 				log.Println("write:", err)

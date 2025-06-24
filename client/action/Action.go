@@ -39,15 +39,6 @@ func (a *Action) Process(cli *client.Client) (msg *proto.Msg, err error) {
 			}
 			return nil, power.Process(cli)
 		}
-	case Password:
-		{
-			password := PasswordAction{}
-			err = json.Unmarshal(a.Ref, &password)
-			if err != nil {
-				return nil, err
-			}
-			return password.Process()
-		}
 	default:
 		return nil, errors.New("invalid action type")
 	}
