@@ -5,6 +5,20 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+if command_exists iptables; then
+  echo "iptables is correctly installed"
+else
+  echo "missing requirements: iptables"
+  exit 1
+fi
+
+if command_exists ip6tables; then
+  echo "ip6tables is correctly installed"
+else
+  echo "missing requirements: ip6tables"
+  exit 1
+fi
+
 # Check if Docker is installed
 if command_exists docker; then
     echo "Docker is already installed and working, skipping installation"
@@ -25,6 +39,19 @@ fi
 
 # Now run the serverbench container
 echo "Setting up serverbench container..."
+# Detect iptables variant
+if iptables --version | grep -q nft; then
+  IPTABLES_BIN="iptables"
+else
+  IPTABLES_BIN="iptables-legacy"
+fi
+
+# Detect ip6tables variant
+if ip6tables --version | grep -q nft; then
+  IP6TABLES_BIN="ip6tables"
+else
+  IP6TABLES_BIN="ip6tables-legacy"
+fi
 docker rm -f serverbench 2>/dev/null || true
 docker run -d \
   --privileged \
@@ -36,8 +63,8 @@ docker run -d \
   -v ./containers:/containers \
   -v ./keys:/keys \
   -v /proc/1/ns/net:/mnt/host_netns \
-  -v $(which iptables):/hostbin/iptables \
-  -v $(which ip6tables):/hostbin/ip6tables \
+  -e IPTABLES_BIN="$IPTABLES_BIN" \
+  -e IP6TABLES_BIN="$IP6TABLES_BIN" \
   -e KEY="$1" \
   -e HOSTNAME="$(hostname)" \
   --pid=host \
