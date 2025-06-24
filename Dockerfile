@@ -1,7 +1,7 @@
 FROM alpine
 
 # Install dependencies
-RUN apk update && apk add --no-cache tini openssh go shadow iptables
+RUN apk update && apk add --no-cache tini openssh go shadow iptables iproute2
 
 # Configure sshd_config to use keys from /keys
 RUN addgroup -S serverbench && \
@@ -25,6 +25,7 @@ RUN go build -o /app/serverbench
 WORKDIR /app
 
 # Entrypoint script to init keys if needed
+COPY ./wrapper /wrapper
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

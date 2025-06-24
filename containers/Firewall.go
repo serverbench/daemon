@@ -1,11 +1,13 @@
 package containers
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"github.com/coreos/go-iptables/iptables"
 	log "github.com/sirupsen/logrus"
 	"net"
+	"os/exec"
 	"strconv"
 )
 
@@ -14,8 +16,24 @@ const udp = "udp"
 
 var protocols = []string{tcp, udp}
 
-const table = "filter"
-const forward = "FORWARD"
+const (
+	table     = "filter"
+	forward   = "FORWARD"
+	hostNetNS = "/mnt/host_netns"
+)
+
+func nsenterIptables(args ...string) error {
+	cmdArgs := append([]string{"--net=" + hostNetNS, "iptables"}, args...)
+	cmd := exec.Command("nsenter", cmdArgs...)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("iptables %v failed: %v: %s", args, err, stderr.String())
+	}
+	return nil
+}
 
 type Firewall struct {
 	Chain    string
@@ -26,16 +44,16 @@ type Firewall struct {
 
 func (c Container) firewall(ports []Port) (firewall Firewall, err error) {
 	ip := net.ParseIP(c.Address)
-	var protocol iptables.Protocol
 	if ip == nil {
 		return firewall, errors.New("invalid address")
 	}
+	var path string
 	if ip.To4() == nil {
-		protocol = iptables.ProtocolIPv6
+		path = "/wrapper/iptables"
 	} else {
-		protocol = iptables.ProtocolIPv4
+		path = "/wrapper/ip6tables"
 	}
-	instance, err := iptables.New(iptables.IPFamily(protocol))
+	instance, err := iptables.New(iptables.Path(path))
 	if err != nil {
 		return firewall, err
 	}
