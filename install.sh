@@ -1,29 +1,29 @@
 #!/bin/bash
 
-set -e  # Optional: exit on any command failure
-
-# Function to check if docker is usable
-docker_available() {
-  command -v docker &>/dev/null && docker info &>/dev/null
+# Define a reusable function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
 }
 
-# Install Docker if not available
-if docker_available; then
+# Check if Docker is installed
+if command_exists docker; then
     echo "Docker is already installed and working, skipping installation"
 else
-    echo "Docker not found or not working, installing..."
+    echo "Docker not found, installing..."
     curl -fsSL https://get.docker.com | sh
-    # Reload PATH and ensure Docker daemon is started
-    export PATH=$PATH:/usr/bin:/usr/local/bin
-    systemctl start docker || service docker start || dockerd &
+
+    # Wait briefly to ensure Docker is usable
     sleep 5
-    if ! docker_available; then
-        echo "Docker installation failed or not started correctly"
-        exit 1
+
+    # Optionally start Docker if it's not running
+    if ! pgrep -x dockerd >/dev/null; then
+        echo "Starting Docker daemon..."
+        systemctl start docker 2>/dev/null || service docker start 2>/dev/null || dockerd &
+        sleep 5
     fi
 fi
 
-# Run daemon - ignore errors from docker rm
+# Now run the serverbench container
 echo "Setting up serverbench container..."
 docker rm -f serverbench 2>/dev/null || true
 docker run \
