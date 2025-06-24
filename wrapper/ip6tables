@@ -1,2 +1,2 @@
 #!/bin/sh
-exec nsenter --net=/mnt/host_netns ip6tables "$@"
+exec nsenter --net=/mnt/host_netns /hostbin/ip6tables "$@"

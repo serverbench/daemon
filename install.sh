@@ -36,6 +36,8 @@ docker run -d \
   -v ./containers:/containers \
   -v ./keys:/keys \
   -v /proc/1/ns/net:/mnt/host_netns \
+  -v $(which iptables):/hostbin/iptables \
+  -v $(which ip6tables):/hostbin/ip6tables \
   -e KEY="$1" \
   -e HOSTNAME="$(hostname)" \
   --pid=host \
