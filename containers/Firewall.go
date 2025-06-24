@@ -49,9 +49,9 @@ func (c Container) firewall(ports []Port) (firewall Firewall, err error) {
 	}
 	var path string
 	if ip.To4() == nil {
-		path = "/wrapper/iptables"
-	} else {
 		path = "/wrapper/ip6tables"
+	} else {
+		path = "/wrapper/iptables"
 	}
 	instance, err := iptables.New(iptables.Path(path))
 	if err != nil {
