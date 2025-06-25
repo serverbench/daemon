@@ -70,6 +70,10 @@ func (c Container) firewall(ports []Port) (firewall Firewall, err error) {
 
 // Install refreshes or installs firewall
 func (f Firewall) Install() (err error) {
+	err = f.ensureParentChain()
+	if err != nil {
+		return err
+	}
 	log.Info("installing chain")
 	err = f.ensureChain()
 	if err != nil {
