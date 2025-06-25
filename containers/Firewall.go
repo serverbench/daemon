@@ -18,7 +18,8 @@ var protocols = []string{tcp, udp}
 
 const (
 	table     = "filter"
-	forward   = "FORWARD"
+	forward   = "serverbench"
+	tlForward = "FORWARD"
 	hostNetNS = "/mnt/host_netns"
 )
 
@@ -57,6 +58,7 @@ func (c Container) firewall(ports []Port) (firewall Firewall, err error) {
 	if err != nil {
 		return firewall, err
 	}
+	log.Info("firewall created for ", c.Address)
 	firewall = Firewall{
 		Chain:    "sb-" + c.Id,
 		Address:  c.Address,
@@ -142,6 +144,25 @@ func (f Firewall) securePort(port Port) (err error) {
 		}
 	}
 	log.Info("secured port")
+	return err
+}
+
+func (f Firewall) ensureParentChain() (err error) {
+	log.Info("ensuring parent chain")
+	exists, err := f.Iptables.ChainExists(table, forward)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		log.Info("parent chain was missing, creating chain")
+		err = f.Iptables.NewChain(table, forward)
+		log.Info("created parent chain, adding default forwarding rule")
+		err = f.Iptables.InsertUnique(table, tlForward, 1, "-j", forward)
+		if err != nil {
+			return err
+		}
+		log.Info("parent chain setup finished")
+	}
 	return err
 }
 

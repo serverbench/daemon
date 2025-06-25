@@ -196,15 +196,15 @@ func (c Container) Create(cli *client.Client) (err error) {
 
 // Update applies the new firewall rules and creates (or updates) the container
 func (c Container) Update(cli *client.Client) (err error) {
-	err = c.InstallFirewall()
-	if err != nil {
-		return err
-	}
 	err = c.pullImage(cli)
 	if err != nil {
 		return err
 	}
 	err = c.createContainer(cli)
+	if err != nil {
+		return err
+	}
+	err = c.InstallFirewall()
 	if err != nil {
 		return err
 	}
