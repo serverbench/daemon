@@ -116,6 +116,7 @@ func (c *Client) handleListener(listener pipe.Pipe) (err error) {
 			}
 		}
 	}
+	log.Info("handling container")
 	if selectedContainer != nil {
 		switch listener.Event {
 		case pipe.EventStatus:
@@ -129,6 +130,7 @@ func (c *Client) handleListener(listener pipe.Pipe) (err error) {
 			} else {
 				err = selectedContainer.PipeLogs(listener.Context, c.Cli, logFilter.Since, logFilter.Until, logFilter.Limit, &listener)
 			}
+			break
 		case pipe.EventPassword:
 			password, err := selectedContainer.ResetPassword()
 			if err == nil {
@@ -137,19 +139,35 @@ func (c *Client) handleListener(listener pipe.Pipe) (err error) {
 				})
 				listener.End()
 			}
+			break
+		case pipe.EventGit:
+			gitFilter := pipe.GitFilter{}
+			err = json.Unmarshal(jsonData, &gitFilter)
+			if err != nil {
+				err = errors.New("unknown git filter")
+			} else {
+				err = selectedContainer.Pull(c.Cli, gitFilter.Token, gitFilter.Uri, gitFilter.Branch, gitFilter.Domain, gitFilter.ResetData)
+				if err == nil {
+					listener.Forward <- listener.Package(pipe.Git{
+						Deployed: true,
+					})
+				}
+				listener.End()
+			}
+			break
 		}
 
 	} else {
 		err = errors.New("container not found")
 	}
+	select {
+	case <-listener.Delete:
+		delete(c.pipes, listener.Lid)
+	}
 	if err != nil {
 		log.Error(err)
 		listener.End()
 		return err
-	}
-	select {
-	case <-listener.Delete:
-		delete(c.pipes, listener.Lid)
 	}
 	return nil
 }
@@ -160,7 +178,18 @@ func (c *Client) containers() (err error) {
 	if err != nil {
 		return err
 	}
-	return c.Machine.UpdateContainers(c.Cli, updatedContainers)
+	created, err := c.Machine.UpdateContainers(c.Cli, updatedContainers)
+	if err != nil {
+		return err
+	}
+	for _, container := range created {
+		var x interface{}
+		err = c.MachineSendAndWait("containers."+container.Id+".postcreate", map[string]interface{}{}, &x)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) handshake() (err error) {

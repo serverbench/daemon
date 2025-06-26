@@ -13,9 +13,11 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	log "github.com/sirupsen/logrus"
+	"github.com/thanhpk/randstr"
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"supervisor/client/proto/pipe"
@@ -32,6 +34,179 @@ type Container struct {
 	Mount   string            `json:"mount"`
 	Envs    map[string]string `json:"envs"`
 	Ports   []Port            `json:"ports"`
+	Branch  *string           `json:"branch"`
+}
+
+func (c Container) isGitRepository() (isRepo bool, err error) {
+	dataPath := c.Dir()
+	gitDir := path.Join(dataPath, ".git")
+	info, err := os.Stat(gitDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return info.IsDir(), nil
+}
+
+func (c Container) Pull(cli *client.Client, token string, uri string, branch string, domain string, resetData bool) (err error) {
+	log.Info("pulling repository")
+	// check state is valid for pull
+	shouldRestart := false
+	status, err := c.getStatus(cli, nil, nil)
+	if err != nil {
+		return err
+	}
+	if status == "paused" {
+		log.Error("unable tu pull while frozen")
+		err = errors.New("unable to perform pull while the container is frozen")
+		return err
+	} else if status == "running" || status == "restarting" {
+		log.Info("stopping container in preparation for pull - container will be restarted when finished")
+		shouldRestart = true
+		if resetData {
+			err = c.Kill(cli)
+		} else {
+			err = c.Stop(cli)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	gitUrl := "https://x-access-token:" + token + "@" + domain + "/" + uri
+	log.Info(gitUrl)
+	isUpdated := false
+	dataPath := c.Dir()
+	if resetData {
+		err = c.Clear()
+		if err != nil {
+			return err
+		}
+		shouldRestart = true
+	}
+	// check if git repo is initialized
+	isRepo, err := c.isGitRepository()
+	if err != nil {
+		log.Error("error while checking if project is within a git repository: ", err)
+		return err
+	}
+	// if the repo is not initialized, we will first pull aside the data, perform a clone, and move data back
+	if !isRepo {
+		log.Info("the container is not on a github repository, initializing")
+		temporaryId, err := c.pullAside()
+		if err != nil {
+			return err
+		}
+		log.Info("initializing container")
+		out, err := exec.Command("git", "-C", dataPath, "clone", "-b", branch, gitUrl, ".").CombinedOutput()
+		log.Info(string(out))
+		if err != nil {
+			log.Error("error while initializing: ", err)
+			_ = c.bringTogether(temporaryId)
+			return err
+		}
+		err = c.bringTogether(temporaryId)
+		if err != nil {
+			return err
+		}
+		isUpdated = true
+	}
+	// clean repo
+	log.Info("whitelisting repo")
+	err = exec.Command("git", "config", "--global", "--add", "safe.directory", dataPath).Run()
+	if err != nil {
+		log.Error("error while whitelisting repo")
+		return err
+	}
+	log.Info("resetting repo")
+	err = exec.Command("git", "-C", dataPath, "reset", "--hard").Run()
+	if err != nil {
+		log.Error("error resetting repo: ", err)
+		return err
+	}
+	log.Info("cleaning up repo")
+	err = exec.Command("git", "-C", dataPath, "clean", "-dff").Run()
+	if err != nil {
+		log.Error("error cleaning up repo: ", err)
+		return err
+	}
+	if !isUpdated {
+		// update remote url (token)
+		log.Info("updating remote")
+		err = exec.Command("git", "-C", dataPath, "remote", "set-url", "origin", gitUrl).Run()
+		if err != nil {
+			log.Error("error while updating remote")
+			return err
+		}
+		// ensure correct branch
+		log.Info("checking out branch")
+		err = exec.Command("git", "-C", dataPath, "checkout", branch).Run()
+		if err != nil {
+			log.Error("error while checking out branch: ", err)
+			return err
+		}
+		// pull changes
+		log.Info("pulling changes")
+		err = exec.Command("git", "-C", dataPath, "pull", "--progress", "--rebase").Run()
+		if err != nil {
+			log.Info("error while pulling changes: ", err)
+			return err
+		}
+	}
+	if shouldRestart {
+		log.Info("restarting the container to match the initial state before pull")
+		err = c.Start(cli)
+	}
+	log.Info("finished pulling")
+	return err
+}
+
+func (c Container) getTemporaryFolder(temporaryId string) string {
+	return filepath.Join(c.homeDir(), "tmp-"+temporaryId)
+}
+
+func (c Container) pullAside() (temporaryId string, err error) {
+	log.Info("pulling aside")
+	temporaryId = randstr.Hex(8)
+	targetPath := c.getTemporaryFolder(temporaryId)
+	err = os.MkdirAll(targetPath, os.ModePerm)
+	if err != nil {
+		return "", err
+	}
+	originPath := c.Dir()
+	r, err := exec.Command("rsync", "-a", "--remove-source-files", c.appendSlash(originPath), targetPath).Output()
+	if err != nil {
+		log.Error("error while pulling aside, trying to bring together: ", string(r), ", ", err)
+		_ = c.bringTogether(temporaryId)
+		return "", err
+	}
+	err = c.Clear()
+	return temporaryId, err
+}
+
+func (c Container) bringTogether(temporaryId string) (err error) {
+	log.Info("bringing together aside")
+	temporaryDirectory := c.getTemporaryFolder(temporaryId)
+	originPath := c.Dir()
+	r, err := exec.Command("rsync", "-a", "--remove-source-files", "--ignore-existing", c.appendSlash(temporaryDirectory), originPath).Output()
+	if err != nil {
+		log.Error("error while bringing together: ", string(r), ", ", err)
+		return err
+	}
+	// cleanup
+	err = os.RemoveAll(temporaryDirectory)
+	if err != nil {
+		log.Error("error while cleaning after bringing together")
+	}
+	return err
+}
+
+func (c Container) appendSlash(str string) string {
+	if len(str) == 0 || str[len(str)-1] != os.PathSeparator {
+		return str + string(os.PathSeparator)
+	}
+	return str
 }
 
 func (c Container) PipeLogs(ctx context.Context, cli *client.Client, since int64, until int64, limit int64, listener *pipe.Pipe) (err error) {
@@ -108,19 +283,34 @@ func (c Container) PipeLogs(ctx context.Context, cli *client.Client, since int64
 	return nil
 }
 
-func (c Container) PipeStatus(ctx context.Context, cli *client.Client, listener *pipe.Pipe) error {
+func (c Container) getStatus(cli *client.Client, ctx *context.Context, cid *string) (status string, err error) {
+	if ctx == nil {
+		scopedContext := context.Background()
+		ctx = &scopedContext
+	}
+	if cid == nil {
+		cidStr, err := c.cId(cli)
+		if err != nil {
+			return "", err
+		}
+		cid = &cidStr
+	}
+	// Step 1: Send initial status using ContainerInspect
+	containerJSON, err := cli.ContainerInspect(*ctx, *cid)
+	if err != nil {
+		return "", err
+	}
+	return containerJSON.State.Status, nil
+}
+
+func (c Container) PipeStatus(ctx context.Context, cli *client.Client, listener *pipe.Pipe) (err error) {
 	cid, err := c.cId(cli)
 	if err != nil {
 		return err
 	}
-	// Step 1: Send initial status using ContainerInspect
-	containerJSON, err := cli.ContainerInspect(ctx, cid)
-	if err != nil {
-		return err
-	}
-
+	currentStatus, err := c.getStatus(cli, &ctx, &cid)
 	initial := pipe.Status{
-		Status: containerJSON.State.Status,
+		Status: currentStatus,
 	}
 
 	select {
@@ -191,11 +381,11 @@ func (c Container) Create(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
-	return c.Update(cli)
+	return c.Update(cli, true)
 }
 
 // Update applies the new firewall rules and creates (or updates) the container
-func (c Container) Update(cli *client.Client) (err error) {
+func (c Container) Update(cli *client.Client, firstUpdate bool) (err error) {
 	err = c.pullImage(cli)
 	if err != nil {
 		return err
@@ -208,10 +398,19 @@ func (c Container) Update(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
+	if firstUpdate {
+		if c.Branch != nil {
+			// don't start the container, we will wait for a git pull request
+			return err
+		}
+	}
 	return c.Start(cli)
 }
 
 func (c Container) InstallFirewall() (err error) {
+	if os.Getenv("SKIP_IPTABLES") == "true" {
+		return nil
+	}
 	firewall, err := c.firewall(c.Ports)
 	if err != nil {
 		return err
@@ -406,15 +605,35 @@ func (c Container) Destroy(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
-	firewall, err := c.firewall(make([]Port, 0))
-	if err != nil {
-		return err
+	if os.Getenv("SKIP_IPTABLES") != "true" {
+		firewall, err := c.firewall(make([]Port, 0))
+		if err != nil {
+			return err
+		}
+		err = firewall.Uninstall()
 	}
-	err = firewall.Uninstall()
 	return err
 }
 
-func (c Container) Clear() error {
+func RemoveGlob(path string) (err error) {
+	contents, err := filepath.Glob(path)
+	if err != nil {
+		return
+	}
+	for _, item := range contents {
+		if item == path {
+			continue
+		}
+		err = os.RemoveAll(item)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (c Container) Clear() (err error) {
 	log.Info("clearing data")
-	return exec.Command("rm", "-rf", filepath.Join(c.Dir(), "**")).Run()
+	err = RemoveGlob(c.Dir())
+	return err
 }

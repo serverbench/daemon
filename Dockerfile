@@ -1,7 +1,7 @@
 FROM alpine
 
 # Install dependencies
-RUN apk update && apk add --no-cache tini openssh go shadow iproute2 iptables iptables-legacy ip6tables
+RUN apk update && apk add --no-cache tini openssh go shadow iproute2 iptables iptables-legacy ip6tables git rsync
 
 # Configure sshd_config to use keys from /keys
 RUN addgroup -S serverbench && \

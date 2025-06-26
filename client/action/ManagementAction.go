@@ -24,6 +24,7 @@ func (a *ManagementAction) Process(cli *client.Client) error {
 		{
 			return a.Container.Update(
 				cli,
+				false,
 			)
 		}
 	default:

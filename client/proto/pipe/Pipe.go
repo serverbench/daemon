@@ -8,6 +8,7 @@ const (
 	EventLog      Event = "log"
 	EventStatus   Event = "status"
 	EventPassword Event = "password"
+	EventGit      Event = "git"
 )
 
 type GenericFilter struct {

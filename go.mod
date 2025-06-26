@@ -14,6 +14,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/shirou/gopsutil/v4 v4.25.3
 	github.com/sirupsen/logrus v1.9.3
+	github.com/thanhpk/randstr v1.0.6
 	github.com/zcalusic/sysinfo v1.1.3
 )
 

@@ -10,6 +10,7 @@ docker run \
   -v /tmp/keys:/keys \
   -e KEY="$1" \
   -e HOSTNAME="$(hostname)" \
+  -e SKIP_IPTABLES="true" \
   -e ENDPOINT="ws://localhost:3030" \
   -e TEST_ETH0="true" \
   --pid=host \
