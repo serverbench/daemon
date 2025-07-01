@@ -66,7 +66,7 @@ docker run -d \
   -e IPTABLES_BIN="$IPTABLES_BIN" \
   -e IP6TABLES_BIN="$IP6TABLES_BIN" \
   -e KEY="$1" \
-  -e HOSTNAME="$(hostname)" \
+  -e HOSTNAME="${2:-$(hostname)}" \
   --pid=host \
   --network=host \
   serverbench/daemon
