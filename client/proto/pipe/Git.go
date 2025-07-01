@@ -10,5 +10,4 @@ type GitFilter struct {
 	Token     string `json:"token"`
 	Branch    string `json:"branch"`
 	Domain    string `json:"domain"`
-	ResetData bool   `json:"resetData"`
 }

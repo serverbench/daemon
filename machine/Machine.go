@@ -96,12 +96,14 @@ func (m *Machine) UpdateContainers(cli *client.Client, newContainers []container
 	for _, c := range m.Containers {
 		toBeDeleted[c.Id] = c
 	}
-	for _, provided := range newContainers {
+	for i := range newContainers {
+		provided := &newContainers[i]
 		if _, exists := toBeDeleted[provided.Id]; exists {
-			existing = append(existing, provided)
+			existing = append(existing, *provided)
 			delete(toBeDeleted, provided.Id)
 		} else {
-			toBeCreated = append(toBeCreated, provided)
+			provided.ExpectingFirstCommit = true
+			toBeCreated = append(toBeCreated, *provided)
 		}
 	}
 	for _, deletedContainer := range toBeDeleted {

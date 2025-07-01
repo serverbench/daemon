@@ -11,6 +11,7 @@ docker run \
   -e KEY="$1" \
   -e HOSTNAME="$(hostname)" \
   -e SKIP_IPTABLES="true" \
+  -e SKIP_UPDATE="true" \
   -e ENDPOINT="ws://localhost:3030" \
   -e TEST_ETH0="true" \
   --pid=host \

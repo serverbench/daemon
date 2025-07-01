@@ -43,7 +43,7 @@ type Firewall struct {
 	Ports    []Port
 }
 
-func (c Container) firewall(ports []Port) (firewall Firewall, err error) {
+func (c *Container) firewall(ports []Port) (firewall Firewall, err error) {
 	ip := net.ParseIP(c.Address)
 	if ip == nil {
 		return firewall, errors.New("invalid address")

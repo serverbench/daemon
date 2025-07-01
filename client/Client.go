@@ -146,7 +146,7 @@ func (c *Client) handleListener(listener pipe.Pipe) (err error) {
 			if err != nil {
 				err = errors.New("unknown git filter")
 			} else {
-				err = selectedContainer.Pull(c.Cli, gitFilter.Token, gitFilter.Uri, gitFilter.Branch, gitFilter.Domain, gitFilter.ResetData)
+				err = selectedContainer.Pull(c.Cli, gitFilter.Token, gitFilter.Uri, gitFilter.Branch, gitFilter.Domain)
 				if err == nil {
 					listener.Forward <- listener.Package(pipe.Git{
 						Deployed: true,
@@ -187,6 +187,21 @@ func (c *Client) containers() (err error) {
 		err = c.MachineSendAndWait("containers."+container.Id+".postcreate", map[string]interface{}{}, &x)
 		if err != nil {
 			return err
+		}
+	}
+	for _, container := range c.Machine.Containers {
+		if container.Branch != nil {
+			commit, err := container.GetCommit()
+			if err != nil {
+				return err
+			}
+			ignore := make(map[string]struct{})
+			data := make(map[string]interface{})
+			data["commit"] = commit
+			err = c.MachineSendAndWait("containers."+container.Id+".commit", data, &ignore)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil

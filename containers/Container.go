@@ -13,11 +13,8 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	log "github.com/sirupsen/logrus"
-	"github.com/thanhpk/randstr"
 	"io"
 	"os"
-	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 	"supervisor/client/proto/pipe"
@@ -28,188 +25,17 @@ import (
 var unknownContainer = errors.New("unknown container")
 
 type Container struct {
-	Id      string            `json:"id"`
-	Image   string            `json:"image"`
-	Address string            `json:"address"`
-	Mount   string            `json:"mount"`
-	Envs    map[string]string `json:"envs"`
-	Ports   []Port            `json:"ports"`
-	Branch  *string           `json:"branch"`
+	Id                   string            `json:"id"`
+	Image                string            `json:"image"`
+	Address              string            `json:"address"`
+	Mount                string            `json:"mount"`
+	Envs                 map[string]string `json:"envs"`
+	Ports                []Port            `json:"ports"`
+	Branch               *string           `json:"branch"`
+	ExpectingFirstCommit bool
 }
 
-func (c Container) isGitRepository() (isRepo bool, err error) {
-	dataPath := c.Dir()
-	gitDir := path.Join(dataPath, ".git")
-	info, err := os.Stat(gitDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return info.IsDir(), nil
-}
-
-func (c Container) Pull(cli *client.Client, token string, uri string, branch string, domain string, resetData bool) (err error) {
-	log.Info("pulling repository")
-	// check state is valid for pull
-	shouldRestart := false
-	status, err := c.getStatus(cli, nil, nil)
-	if err != nil {
-		return err
-	}
-	if status == "paused" {
-		log.Error("unable tu pull while frozen")
-		err = errors.New("unable to perform pull while the container is frozen")
-		return err
-	} else if status == "running" || status == "restarting" {
-		log.Info("stopping container in preparation for pull - container will be restarted when finished")
-		shouldRestart = true
-		if resetData {
-			err = c.Kill(cli)
-		} else {
-			err = c.Stop(cli)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	gitUrl := "https://x-access-token:" + token + "@" + domain + "/" + uri
-	log.Info(gitUrl)
-	isUpdated := false
-	dataPath := c.Dir()
-	if resetData {
-		err = c.Clear()
-		if err != nil {
-			return err
-		}
-		shouldRestart = true
-	}
-	// check if git repo is initialized
-	isRepo, err := c.isGitRepository()
-	if err != nil {
-		log.Error("error while checking if project is within a git repository: ", err)
-		return err
-	}
-	// if the repo is not initialized, we will first pull aside the data, perform a clone, and move data back
-	if !isRepo {
-		log.Info("the container is not on a github repository, initializing")
-		temporaryId, err := c.pullAside()
-		if err != nil {
-			return err
-		}
-		log.Info("initializing container")
-		out, err := exec.Command("git", "-C", dataPath, "clone", "-b", branch, gitUrl, ".").CombinedOutput()
-		log.Info(string(out))
-		if err != nil {
-			log.Error("error while initializing: ", err)
-			_ = c.bringTogether(temporaryId)
-			return err
-		}
-		err = c.bringTogether(temporaryId)
-		if err != nil {
-			return err
-		}
-		isUpdated = true
-	}
-	// clean repo
-	log.Info("whitelisting repo")
-	err = exec.Command("git", "config", "--global", "--add", "safe.directory", dataPath).Run()
-	if err != nil {
-		log.Error("error while whitelisting repo")
-		return err
-	}
-	log.Info("resetting repo")
-	err = exec.Command("git", "-C", dataPath, "reset", "--hard").Run()
-	if err != nil {
-		log.Error("error resetting repo: ", err)
-		return err
-	}
-	log.Info("cleaning up repo")
-	err = exec.Command("git", "-C", dataPath, "clean", "-dff").Run()
-	if err != nil {
-		log.Error("error cleaning up repo: ", err)
-		return err
-	}
-	if !isUpdated {
-		// update remote url (token)
-		log.Info("updating remote")
-		err = exec.Command("git", "-C", dataPath, "remote", "set-url", "origin", gitUrl).Run()
-		if err != nil {
-			log.Error("error while updating remote")
-			return err
-		}
-		// ensure correct branch
-		log.Info("checking out branch")
-		err = exec.Command("git", "-C", dataPath, "checkout", branch).Run()
-		if err != nil {
-			log.Error("error while checking out branch: ", err)
-			return err
-		}
-		// pull changes
-		log.Info("pulling changes")
-		err = exec.Command("git", "-C", dataPath, "pull", "--progress", "--rebase").Run()
-		if err != nil {
-			log.Info("error while pulling changes: ", err)
-			return err
-		}
-	}
-	if shouldRestart {
-		log.Info("restarting the container to match the initial state before pull")
-		err = c.Start(cli)
-	}
-	log.Info("finished pulling")
-	return err
-}
-
-func (c Container) getTemporaryFolder(temporaryId string) string {
-	return filepath.Join(c.homeDir(), "tmp-"+temporaryId)
-}
-
-func (c Container) pullAside() (temporaryId string, err error) {
-	log.Info("pulling aside")
-	temporaryId = randstr.Hex(8)
-	targetPath := c.getTemporaryFolder(temporaryId)
-	err = os.MkdirAll(targetPath, os.ModePerm)
-	if err != nil {
-		return "", err
-	}
-	originPath := c.Dir()
-	r, err := exec.Command("rsync", "-a", "--remove-source-files", c.appendSlash(originPath), targetPath).Output()
-	if err != nil {
-		log.Error("error while pulling aside, trying to bring together: ", string(r), ", ", err)
-		_ = c.bringTogether(temporaryId)
-		return "", err
-	}
-	err = c.Clear()
-	return temporaryId, err
-}
-
-func (c Container) bringTogether(temporaryId string) (err error) {
-	log.Info("bringing together aside")
-	temporaryDirectory := c.getTemporaryFolder(temporaryId)
-	originPath := c.Dir()
-	r, err := exec.Command("rsync", "-a", "--remove-source-files", "--ignore-existing", c.appendSlash(temporaryDirectory), originPath).Output()
-	if err != nil {
-		log.Error("error while bringing together: ", string(r), ", ", err)
-		return err
-	}
-	// cleanup
-	err = os.RemoveAll(temporaryDirectory)
-	if err != nil {
-		log.Error("error while cleaning after bringing together")
-	}
-	return err
-}
-
-func (c Container) appendSlash(str string) string {
-	if len(str) == 0 || str[len(str)-1] != os.PathSeparator {
-		return str + string(os.PathSeparator)
-	}
-	return str
-}
-
-func (c Container) PipeLogs(ctx context.Context, cli *client.Client, since int64, until int64, limit int64, listener *pipe.Pipe) (err error) {
+func (c *Container) PipeLogs(ctx context.Context, cli *client.Client, since int64, until int64, limit int64, listener *pipe.Pipe) (err error) {
 	sinceStr := ""
 	untilStr := ""
 	follow := false
@@ -283,7 +109,7 @@ func (c Container) PipeLogs(ctx context.Context, cli *client.Client, since int64
 	return nil
 }
 
-func (c Container) getStatus(cli *client.Client, ctx *context.Context, cid *string) (status string, err error) {
+func (c *Container) getStatus(cli *client.Client, ctx *context.Context, cid *string) (status string, err error) {
 	if ctx == nil {
 		scopedContext := context.Background()
 		ctx = &scopedContext
@@ -303,7 +129,7 @@ func (c Container) getStatus(cli *client.Client, ctx *context.Context, cid *stri
 	return containerJSON.State.Status, nil
 }
 
-func (c Container) PipeStatus(ctx context.Context, cli *client.Client, listener *pipe.Pipe) (err error) {
+func (c *Container) PipeStatus(ctx context.Context, cli *client.Client, listener *pipe.Pipe) (err error) {
 	cid, err := c.cId(cli)
 	if err != nil {
 		return err
@@ -362,11 +188,11 @@ func (c Container) PipeStatus(ctx context.Context, cli *client.Client, listener 
 	}
 }
 
-func (c Container) Dir() string {
+func (c *Container) Dir() string {
 	return filepath.Join("/containers/", c.Id)
 }
 
-func (c Container) HostDir(cli *client.Client) (hostPath *string, err error) {
+func (c *Container) HostDir(cli *client.Client) (hostPath *string, err error) {
 	containerRoot, err := hardware.GetHostPath(cli)
 	if err != nil {
 		return hostPath, err
@@ -376,7 +202,7 @@ func (c Container) HostDir(cli *client.Client) (hostPath *string, err error) {
 }
 
 // Create creates the user and spins up the container
-func (c Container) Create(cli *client.Client) (err error) {
+func (c *Container) Create(cli *client.Client) (err error) {
 	err = c.createUser()
 	if err != nil {
 		return err
@@ -385,7 +211,7 @@ func (c Container) Create(cli *client.Client) (err error) {
 }
 
 // Update applies the new firewall rules and creates (or updates) the container
-func (c Container) Update(cli *client.Client, firstUpdate bool) (err error) {
+func (c *Container) Update(cli *client.Client, firstUpdate bool) (err error) {
 	err = c.pullImage(cli)
 	if err != nil {
 		return err
@@ -398,6 +224,7 @@ func (c Container) Update(cli *client.Client, firstUpdate bool) (err error) {
 	if err != nil {
 		return err
 	}
+	log.Info("first update: ", firstUpdate, ", branch: ", c.Branch)
 	if firstUpdate {
 		if c.Branch != nil {
 			// don't start the container, we will wait for a git pull request
@@ -407,7 +234,7 @@ func (c Container) Update(cli *client.Client, firstUpdate bool) (err error) {
 	return c.Start(cli)
 }
 
-func (c Container) InstallFirewall() (err error) {
+func (c *Container) InstallFirewall() (err error) {
 	if os.Getenv("SKIP_IPTABLES") == "true" {
 		return nil
 	}
@@ -419,7 +246,7 @@ func (c Container) InstallFirewall() (err error) {
 	return err
 }
 
-func (c Container) pullImage(cli *client.Client) (err error) {
+func (c *Container) pullImage(cli *client.Client) (err error) {
 	log.Info("pulling image")
 	out, err := cli.ImagePull(context.Background(), c.Image, image.PullOptions{})
 	if err != nil {
@@ -435,7 +262,7 @@ func (c Container) pullImage(cli *client.Client) (err error) {
 	return nil
 }
 
-func (c Container) createContainer(cli *client.Client) (err error) {
+func (c *Container) createContainer(cli *client.Client) (err error) {
 	_, fetchErr := c.cId(cli)
 	if fetchErr == nil {
 		err = c.Stop(cli)
@@ -496,7 +323,7 @@ func (c Container) createContainer(cli *client.Client) (err error) {
 	return err
 }
 
-func (c Container) Start(cli *client.Client) (err error) {
+func (c *Container) Start(cli *client.Client) (err error) {
 	log.Info("starting container")
 	ctx := context.Background()
 	cid, err := c.cId(cli)
@@ -506,7 +333,7 @@ func (c Container) Start(cli *client.Client) (err error) {
 	return cli.ContainerStart(ctx, cid, container.StartOptions{})
 }
 
-func (c Container) Stop(cli *client.Client) (err error) {
+func (c *Container) Stop(cli *client.Client) (err error) {
 	log.Info("stopping container")
 	ctx := context.Background()
 	cid, err := c.cId(cli)
@@ -516,7 +343,7 @@ func (c Container) Stop(cli *client.Client) (err error) {
 	return cli.ContainerStop(ctx, cid, container.StopOptions{})
 }
 
-func (c Container) Restart(cli *client.Client) (err error) {
+func (c *Container) Restart(cli *client.Client) (err error) {
 	log.Info("restarting container")
 	ctx := context.Background()
 	cid, err := c.cId(cli)
@@ -526,7 +353,7 @@ func (c Container) Restart(cli *client.Client) (err error) {
 	return cli.ContainerRestart(ctx, cid, container.StopOptions{})
 }
 
-func (c Container) Pause(cli *client.Client) (err error) {
+func (c *Container) Pause(cli *client.Client) (err error) {
 	log.Info("pausing container")
 	ctx := context.Background()
 	cid, err := c.cId(cli)
@@ -536,7 +363,7 @@ func (c Container) Pause(cli *client.Client) (err error) {
 	return cli.ContainerPause(ctx, cid)
 }
 
-func (c Container) Unpause(cli *client.Client) (err error) {
+func (c *Container) Unpause(cli *client.Client) (err error) {
 	log.Info("unpausing container")
 	ctx := context.Background()
 	cid, err := c.cId(cli)
@@ -546,7 +373,7 @@ func (c Container) Unpause(cli *client.Client) (err error) {
 	return cli.ContainerUnpause(ctx, cid)
 }
 
-func (c Container) Kill(cli *client.Client) (err error) {
+func (c *Container) Kill(cli *client.Client) (err error) {
 	log.Info("killing container")
 	ctx := context.Background()
 	cid, err := c.cId(cli)
@@ -556,7 +383,7 @@ func (c Container) Kill(cli *client.Client) (err error) {
 	return cli.ContainerKill(ctx, cid, "SIGKILL")
 }
 
-func (c Container) deleteContainer(cli *client.Client) (err error) {
+func (c *Container) deleteContainer(cli *client.Client) (err error) {
 	log.Info("deleting container")
 	cid, err := c.cId(cli)
 	if err != nil {
@@ -570,11 +397,11 @@ func (c Container) deleteContainer(cli *client.Client) (err error) {
 	})
 }
 
-func (c Container) cName() (cname string) {
+func (c *Container) cName() (cname string) {
 	return "sb-" + c.Id
 }
 
-func (c Container) cId(cli *client.Client) (cid string, err error) {
+func (c *Container) cId(cli *client.Client) (cid string, err error) {
 	containers, err := cli.ContainerList(context.Background(), container.ListOptions{
 		All: true,
 		Filters: filters.NewArgs(filters.KeyValuePair{
@@ -592,7 +419,7 @@ func (c Container) cId(cli *client.Client) (cid string, err error) {
 }
 
 // Destroy removes everything related to that container
-func (c Container) Destroy(cli *client.Client) (err error) {
+func (c *Container) Destroy(cli *client.Client) (err error) {
 	err = c.deleteContainer(cli)
 	if err != nil {
 		return err
@@ -615,7 +442,7 @@ func (c Container) Destroy(cli *client.Client) (err error) {
 	return err
 }
 
-func RemoveGlob(path string) (err error) {
+func removeGlob(path string) (err error) {
 	contents, err := filepath.Glob(path)
 	if err != nil {
 		return
@@ -632,8 +459,11 @@ func RemoveGlob(path string) (err error) {
 	return
 }
 
-func (c Container) Clear() (err error) {
+func (c *Container) Clear() (err error) {
+	if os.Getenv("SKIP_CLEAN") == "true" {
+		return nil
+	}
 	log.Info("clearing data")
-	err = RemoveGlob(c.Dir())
+	err = removeGlob(c.Dir())
 	return err
 }
