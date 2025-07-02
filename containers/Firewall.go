@@ -135,14 +135,14 @@ func (f Firewall) securePort(port Port) (err error) {
 	}
 	for _, remote := range port.Remotes {
 		for _, protocol := range protocols {
-			err = f.Iptables.AppendUnique(table, f.Chain, "-p", protocol, "-m", "conntrack", "--ctorigsrc", remote, "--ctorigdst", f.Address, "--ctorigdstport", strconv.Itoa(port.Port), "-j", port.Policy)
+			err = f.Iptables.AppendUnique(table, f.Chain, "-p", protocol, "-m", "conntrack", "--ctorigsrc", remote, "--ctorigdst", f.Address, "--ctorigdstport", strconv.Itoa(port.Port), "-j", unmatchPolicy)
 			if err != nil {
 				return err
 			}
 		}
 	}
 	for _, protocol := range protocols {
-		err = f.Iptables.AppendUnique(table, f.Chain, "-p", protocol, "-m", "conntrack", "--ctorigdst", f.Address, "--ctorigdstport", strconv.Itoa(port.Port), "-j", unmatchPolicy)
+		err = f.Iptables.AppendUnique(table, f.Chain, "-p", protocol, "-m", "conntrack", "--ctorigdst", f.Address, "--ctorigdstport", strconv.Itoa(port.Port), "-j", port.Policy)
 		if err != nil {
 			return err
 		}
