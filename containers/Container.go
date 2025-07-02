@@ -297,10 +297,15 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	err, perm := c.PermSnippet()
+	if err != nil {
+		return err
+	}
 	config := &container.Config{
 		Image:        c.Image,
 		ExposedPorts: exposedPorts,
 		Env:          env,
+		User:         perm,
 	}
 	hostPath, err := c.HostDir(cli)
 	if err != nil {

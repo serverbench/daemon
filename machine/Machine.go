@@ -76,6 +76,10 @@ func GetMachine(cli *client.Client) (machine *Machine, err error) {
 			Envs:    map[string]string{},
 			Ports:   []containers.Port{},
 		}
+		err = finalContainer.ReadyFs()
+		if err != nil {
+			return machine, err
+		}
 		err = finalContainer.MountDir()
 		if err != nil {
 			return machine, err

@@ -7,6 +7,7 @@ docker run \
   --name serverbench \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /tmp/containers:/containers \
+  -v serverbench-sshd:/etc \
   -v /tmp/keys:/keys \
   -e KEY="$1" \
   -e HOSTNAME="$(hostname)" \

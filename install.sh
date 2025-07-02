@@ -62,6 +62,7 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v ./containers:/containers \
   -v ./keys:/keys \
+  -v serverbench-sshd:/etc \
   -v /proc/1/ns/net:/mnt/host_netns \
   -e IPTABLES_BIN="$IPTABLES_BIN" \
   -e IP6TABLES_BIN="$IP6TABLES_BIN" \

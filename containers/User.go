@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 )
@@ -42,7 +43,32 @@ func (c *Container) createUser() (err error) {
 	return c.MountDir()
 }
 
+func (c *Container) PermSnippet() (err error, snippet string) {
+	u, err := user.Lookup(c.Id)
+	if err != nil {
+		return errors.New("error looking up user: " + err.Error()), ""
+	}
+	g, err := user.LookupGroup(group)
+	if err != nil {
+		return errors.New("error looking up group: " + err.Error()), ""
+	}
+
+	uid := u.Uid
+	gid := g.Gid
+
+	return nil, uid + ":" + gid
+}
+
 func (c *Container) ReadyFs() (err error) {
+	exists, err := c.userExists()
+	if !exists {
+		return c.createUser()
+	}
+	log.Info("ensuring user folder")
+	err = exec.Command("mkdir", "-p", c.homeDir()).Run()
+	if err != nil {
+		return err
+	}
 	log.Info("jailing user (chown)")
 	err = exec.Command("chown", "root:root", c.homeDir()).Run()
 	if err != nil {
@@ -64,7 +90,11 @@ func (c *Container) ReadyFs() (err error) {
 		return err
 	}
 	log.Info("chown-ing data directory")
-	err = exec.Command("chown", "-R", c.Id+":"+group, c.Dir()).Run()
+	err, perm := c.PermSnippet()
+	if err != nil {
+		return err
+	}
+	err = exec.Command("chown", "-R", perm, c.Dir()).Run()
 	if err != nil {
 		return err
 	}
