@@ -28,19 +28,27 @@ func (c *Container) createUser() (err error) {
 	log.Info("creating user")
 	err = exec.Command("useradd", "-m", "-d", c.homeDir(), "-G", group, "--shell", "/bin/false", c.Id).Run()
 	if err != nil {
+		log.Error("error while creating user: ", err)
 		return err
 	}
 	log.Info("resetting password")
 	_, err = c.ResetPassword()
 	if err != nil {
+		log.Error("error while resetting password: ", err)
 		return err
 	}
 	err = c.ReadyFs()
 	if err != nil {
+		log.Error("error while preparing FS: ", err)
 		return err
 	}
 	// TODO implement quotas
-	return c.MountDir()
+	err = c.MountDir()
+	if err != nil {
+		log.Error("error while mounting dir:", err)
+		return err
+	}
+	return nil
 }
 
 func (c *Container) PermSnippet() (err error, snippet string) {
@@ -67,37 +75,45 @@ func (c *Container) ReadyFs() (err error) {
 	log.Info("ensuring user folder")
 	err = exec.Command("mkdir", "-p", c.homeDir()).Run()
 	if err != nil {
+		log.Error("error while creating folder: ", err)
 		return err
 	}
 	log.Info("jailing user (chown)")
 	err = exec.Command("chown", "root:root", c.homeDir()).Run()
 	if err != nil {
+		log.Error("error while jailing user: ", err)
 		return err
 	}
 	log.Info("jailing user (chmod)")
 	err = exec.Command("chmod", "755", c.homeDir()).Run()
 	if err != nil {
+		log.Error("error while chmod 755: ", err)
 		return err
 	}
 	log.Info("adding user data root")
 	err = exec.Command("mkdir", "-p", c.dataDir()).Run()
 	if err != nil {
+		log.Error("error while creating data folder: ", err)
 		return err
 	}
 	log.Info("creating container data directory")
 	err = exec.Command("mkdir", "-p", c.Dir()).Run()
 	if err != nil {
+		log.Error("error while creating container folder: ", err)
 		return err
 	}
 	log.Info("chown-ing data directory")
 	err, perm := c.PermSnippet()
 	if err != nil {
+		log.Error("error while getting perm snippet: ", err)
 		return err
 	}
 	err = exec.Command("chown", "-R", perm, c.Dir()).Run()
 	if err != nil {
+		log.Error("error while chowning to user: ", err)
 		return err
 	}
+	log.Info("readied fs")
 	return nil
 }
 
@@ -212,11 +228,14 @@ func (c *Container) MountDir() (err error) {
 	log.Info("mounting data dir")
 	exists, err := c.userExists()
 	if err != nil {
+		log.Error("error while checking if user exists: ", err)
 		return err
 	}
 	if !exists {
+		log.Info("user doesn't exist, creating one")
 		err = c.createUser()
 	} else {
+		log.Info("user already exists, mounting")
 		return exec.Command("mount", "--bind", c.Dir(), c.dataDir()).Run()
 	}
 	return err
