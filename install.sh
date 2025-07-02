@@ -62,12 +62,11 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v ./containers:/containers \
   -v ./keys:/keys \
-  -v serverbench-sshd:/etc \
   -v /proc/1/ns/net:/mnt/host_netns \
   -e IPTABLES_BIN="$IPTABLES_BIN" \
   -e IP6TABLES_BIN="$IP6TABLES_BIN" \
-  -e KEY="$1" \
-  -e HOSTNAME="${2:-$(hostname)}" \
+  -e KEY="m_sk_JC2UeNEPJ80gv1V7UuT8dZgEHrX8NBwn2aUZCSZDpC81aOTynQrS3GteCR-2Yj1T" \
+  -e HOSTNAME="purevanilla-2" \
   --pid=host \
   --network=host \
   serverbench/daemon

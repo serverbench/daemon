@@ -270,8 +270,10 @@ func (c *Container) ResetPassword() (string, error) {
 	cmd := exec.Command("chpasswd")
 	cmd.Stdin = strings.NewReader(fmt.Sprintf("%s:%s", c.Id, password))
 
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to reset password: %w", err)
+	out, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return "", fmt.Errorf("failed to reset password: %w %s", err, string(out))
 	}
 
 	return password, nil
