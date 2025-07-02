@@ -6,9 +6,7 @@ import (
 	"supervisor/containers"
 )
 
-const Create = "create"
 const Update = "update"
-const Delete = "delete"
 
 type ManagementAction struct {
 	Id        string               `json:"id"`

@@ -409,6 +409,16 @@ func (c *Client) actions() error {
 			a.Ref = nil
 			log.Error("error processing action", a, actionErr)
 		}
+		for i := range c.Machine.Containers {
+			if c.Machine.Containers[i].Id == a.Container.Id {
+				c.Machine.Containers[i].ExpectingFirstCommit = false
+				c.Machine.Containers[i].Ports = a.Container.Ports
+				c.Machine.Containers[i].Image = a.Container.Image
+				c.Machine.Containers[i].Branch = a.Container.Branch
+				c.Machine.Containers[i].Envs = a.Container.Envs
+				c.Machine.Containers[i].Mount = a.Container.Mount
+			}
+		}
 		if update != nil {
 			actionErr = c.ContainerSendAndWait(a.Container, update.Action, update.Params, &proto.Reply{})
 			if actionErr != nil {

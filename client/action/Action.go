@@ -9,7 +9,6 @@ import (
 )
 
 const Management = "management"
-const Password = "password"
 const Power = "power"
 
 type Action struct {
