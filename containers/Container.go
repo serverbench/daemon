@@ -213,7 +213,7 @@ func (c *Container) Create(cli *client.Client) (err error) {
 // Update applies the new firewall rules and creates (or updates) the container
 func (c *Container) Update(cli *client.Client, firstUpdate bool) (err error) {
 	status, statusErr := c.getStatus(cli, nil, nil)
-	shouldRestart := !firstUpdate
+	shouldRestart := !(firstUpdate && c.Branch != nil)
 	if shouldRestart && statusErr == nil {
 		if status != "running" && status != "restarting" {
 			shouldRestart = false
@@ -232,12 +232,6 @@ func (c *Container) Update(cli *client.Client, firstUpdate bool) (err error) {
 		return err
 	}
 	log.Info("first update: ", firstUpdate, ", branch: ", c.Branch)
-	if firstUpdate {
-		if c.Branch != nil {
-			// don't start the container, we will wait for a git pull request
-			return err
-		}
-	}
 	if shouldRestart {
 		return c.Start(cli)
 	}
