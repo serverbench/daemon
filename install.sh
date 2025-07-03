@@ -1,24 +1,25 @@
-#!/bin/bash
+#!/bin/sh
 
 # Parse command line arguments
 SAFE_MODE=false
-ARGS=()
+ARGS=""
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --safe)
             SAFE_MODE=true
             shift
             ;;
         *)
-            ARGS+=("$1")
+            ARGS="$ARGS \"$1\""
             shift
             ;;
     esac
 done
 
 # Set positional parameters from remaining args
-set -- "${ARGS[@]}"
+# Use eval to correctly handle quoted args stored in ARGS
+eval set -- $ARGS
 
 # Define a reusable function to check if a command exists
 command_exists() {
@@ -50,24 +51,31 @@ else
     sleep 5
 
     # Optionally start Docker if it's not running
-    if ! pgrep -x dockerd >/dev/null; then
+    if ! pgrep -x dockerd >/dev/null 2>&1; then
         echo "Starting Docker daemon..."
-        systemctl start docker 2>/dev/null || service docker start 2>/dev/null || dockerd &
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl start docker 2>/dev/null
+        elif command -v service >/dev/null 2>&1; then
+            service docker start 2>/dev/null
+        else
+            dockerd &
+        fi
         sleep 5
     fi
 fi
 
 # Now run the serverbench container
 echo "Setting up serverbench container..."
+
 # Detect iptables variant
-if iptables --version | grep -q nf; then
+if iptables --version 2>&1 | grep -q nf; then
   IPTABLES_BIN="iptables"
 else
   IPTABLES_BIN="iptables-legacy"
 fi
 
 # Detect ip6tables variant
-if ip6tables --version | grep -q nf; then
+if ip6tables --version 2>&1 | grep -q nf; then
   IP6TABLES_BIN="ip6tables"
 else
   IP6TABLES_BIN="ip6tables-legacy"
@@ -75,7 +83,7 @@ fi
 
 docker rm -f serverbench 2>/dev/null || true
 
-# Build docker run command with conditional SKIP_CLEAN env var
+# Compose docker run command in a variable
 DOCKER_CMD="docker run -d \
   --privileged \
   --cap-add=NET_ADMIN \
@@ -92,17 +100,12 @@ DOCKER_CMD="docker run -d \
   -e KEY=\"$1\" \
   -e HOSTNAME=\"${2:-$(hostname)}\""
 
-# Add SKIP_CLEAN environment variable if --safe flag is used
-if [ "$SAFE_MODE" = true ]; then
-    DOCKER_CMD="$DOCKER_CMD \
-  -e SKIP_CLEAN=true"
+if [ "$SAFE_MODE" = "true" ]; then
+    DOCKER_CMD="$DOCKER_CMD -e SKIP_CLEAN=true"
     echo "Running in safe mode (SKIP_CLEAN=true)"
 fi
 
-DOCKER_CMD="$DOCKER_CMD \
-  --pid=host \
-  --network=host \
-  serverbench/daemon"
+DOCKER_CMD="$DOCKER_CMD --pid=host --network=host serverbench/daemon"
 
 # Execute the docker command
 eval $DOCKER_CMD
