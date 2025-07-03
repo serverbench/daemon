@@ -212,6 +212,13 @@ func (c *Container) Create(cli *client.Client) (err error) {
 
 // Update applies the new firewall rules and creates (or updates) the container
 func (c *Container) Update(cli *client.Client, firstUpdate bool) (err error) {
+	status, statusErr := c.getStatus(cli, nil, nil)
+	shouldRestart := !firstUpdate
+	if shouldRestart && statusErr == nil {
+		if status != "running" && status != "restarting" {
+			shouldRestart = false
+		}
+	}
 	err = c.pullImage(cli)
 	if err != nil {
 		return err
@@ -231,7 +238,10 @@ func (c *Container) Update(cli *client.Client, firstUpdate bool) (err error) {
 			return err
 		}
 	}
-	return c.Start(cli)
+	if shouldRestart {
+		return c.Start(cli)
+	}
+	return nil
 }
 
 func (c *Container) InstallFirewall() (err error) {

@@ -37,6 +37,8 @@ type Client struct {
 }
 
 const responseTimeout = time.Second * 5
+const pingInterval = time.Second * 30 // Send ping every 30 seconds
+const pongTimeout = time.Second * 10  // Wait up to 10 seconds for pong response
 
 func (c *Client) sendRaw(action string, data map[string]interface{}) (string, error) {
 	rid, err := gonanoid.New()
@@ -284,8 +286,62 @@ func (c *Client) Start(cli *client.Client) (err error) {
 	}
 	defer c.Conn.Close()
 
-	// Create a done channel
+	// Create channels for coordination
 	done := make(chan struct{})
+	pongReceived := make(chan struct{}, 1)
+
+	// Set up ping/pong handlers
+	c.Conn.SetPingHandler(func(appData string) error {
+		log.Debug("Received ping from server")
+		// Respond to ping with pong
+		err := c.Conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(time.Second))
+		if err != nil {
+			log.Error("Failed to send pong:", err)
+		}
+		return err
+	})
+
+	c.Conn.SetPongHandler(func(appData string) error {
+		log.Debug("Received pong from server")
+		select {
+		case pongReceived <- struct{}{}:
+		default:
+			// Channel is full, which is fine - we just need to know a pong was received
+		}
+		return nil
+	})
+
+	// Ping goroutine - sends periodic pings to keep connection alive
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				log.Debug("Sending ping to server")
+				err := c.Conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(time.Second))
+				if err != nil {
+					log.Error("Failed to send ping:", err)
+					return
+				}
+
+				// Wait for pong response with timeout
+				select {
+				case <-pongReceived:
+					log.Debug("Pong received - connection is alive")
+				case <-time.After(pongTimeout):
+					log.Error("No pong received - connection appears dead")
+					c.Conn.Close()
+					return
+				case <-done:
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
 
 	// Reader goroutine
 	go func() {
@@ -359,20 +415,31 @@ func (c *Client) Start(cli *client.Client) (err error) {
 
 	// Writer goroutine
 	go func() {
-		for msg := range c.SendChan {
-			err := c.Conn.WriteJSON(msg)
-			if err != nil {
-				log.Println("write:", err)
+		for {
+			select {
+			case msg := <-c.SendChan:
+				err := c.Conn.WriteJSON(msg)
+				if err != nil {
+					log.Println("write:", err)
+					return
+				}
+			case <-done:
 				return
 			}
 		}
 	}()
 
+	// Forward goroutine
 	go func() {
-		for msg := range c.ForwardChan {
-			err := c.Conn.WriteJSON(msg)
-			if err != nil {
-				log.Println("write:", err)
+		for {
+			select {
+			case msg := <-c.ForwardChan:
+				err := c.Conn.WriteJSON(msg)
+				if err != nil {
+					log.Println("write:", err)
+					return
+				}
+			case <-done:
 				return
 			}
 		}
@@ -392,6 +459,7 @@ func (c *Client) Start(cli *client.Client) (err error) {
 
 	return nil
 }
+
 func (c *Client) actions() error {
 	var rawMessages []json.RawMessage
 	if err := c.MachineSendAndWait("actions", map[string]interface{}{}, &rawMessages); err != nil {
