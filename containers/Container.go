@@ -324,6 +324,9 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 				Target: c.Mount,
 			},
 		},
+		RestartPolicy: container.RestartPolicy{
+			Name: container.RestartPolicyUnlessStopped,
+		},
 	}
 	_, err = cli.ContainerCreate(context.Background(), config, hostConfig, nil, nil, c.cName())
 	if err != nil {
