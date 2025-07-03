@@ -34,6 +34,11 @@ type Client struct {
 	Machine     *machine.Machine
 	callbacks   map[string]chan proto.Reply
 	pipes       map[string]pipe.Pipe
+
+	// Add connection monitoring fields
+	pingInterval time.Duration
+	pongWait     time.Duration
+	writeWait    time.Duration
 }
 
 const responseTimeout = time.Second * 5
@@ -257,12 +262,50 @@ func (c *Client) ContainerSendAndWait(container containers.Container, action str
 	return c.MachineSendAndWait("container."+container.Id+"."+action, data, result)
 }
 
+// Add ping/pong handling to detect connection issues
+func (c *Client) setupPingPong() {
+	// Set up ping/pong handling
+	c.Conn.SetPongHandler(func(string) error {
+		log.Debug("Received pong")
+		c.Conn.SetReadDeadline(time.Now().Add(c.pongWait))
+		return nil
+	})
+
+	// Set initial read deadline
+	c.Conn.SetReadDeadline(time.Now().Add(c.pongWait))
+}
+
+func (c *Client) pingHandler(done chan struct{}) {
+	ticker := time.NewTicker(c.pingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.Conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+			if err := c.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+				log.Error("Failed to send ping:", err)
+				return
+			}
+			log.Debug("Sent ping")
+		case <-done:
+			return
+		}
+	}
+}
+
 func (c *Client) Start(cli *client.Client) (err error) {
 	c.Cli = cli
 	c.pipes = make(map[string]pipe.Pipe)
 	c.ForwardChan = make(chan pipe.Forward, 100)
 	c.SendChan = make(chan proto.Msg, 100)
 	c.callbacks = make(map[string]chan proto.Reply)
+
+	// Set connection monitoring timeouts
+	c.pingInterval = 30 * time.Second // Send ping every 30 seconds
+	c.pongWait = 60 * time.Second     // Wait 60 seconds for pong response
+	c.writeWait = 10 * time.Second    // Wait 10 seconds for write to complete
+
 	c.Machine, err = machine.GetMachine(cli)
 	if err != nil {
 		return err
@@ -284,8 +327,16 @@ func (c *Client) Start(cli *client.Client) (err error) {
 	}
 	defer c.Conn.Close()
 
-	// Create a done channel
+	// Set up ping/pong handling
+	c.setupPingPong()
+
+	// Create channels for coordinating goroutines
 	done := make(chan struct{})
+	writerDone := make(chan struct{})
+	forwardDone := make(chan struct{})
+
+	// Start ping handler
+	go c.pingHandler(done)
 
 	// Reader goroutine
 	go func() {
@@ -293,7 +344,7 @@ func (c *Client) Start(cli *client.Client) (err error) {
 		for {
 			_, message, err := c.Conn.ReadMessage()
 			if err != nil {
-				log.Println("read:", err)
+				log.Error("WebSocket read error:", err)
 				return
 			}
 			var incoming proto.Incoming
@@ -344,7 +395,7 @@ func (c *Client) Start(cli *client.Client) (err error) {
 			} else {
 				var reply proto.Reply
 				if err := json.Unmarshal(message, &reply); err != nil {
-					log.Println("failed to decode reply:", err)
+					log.Error("failed to decode reply:", err)
 					continue
 				}
 				if reply.Rid != "" {
@@ -359,20 +410,43 @@ func (c *Client) Start(cli *client.Client) (err error) {
 
 	// Writer goroutine
 	go func() {
-		for msg := range c.SendChan {
-			err := c.Conn.WriteJSON(msg)
-			if err != nil {
-				log.Println("write:", err)
+		defer close(writerDone)
+		for {
+			select {
+			case msg, ok := <-c.SendChan:
+				if !ok {
+					log.Info("SendChan closed, stopping writer")
+					return
+				}
+				c.Conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+				err := c.Conn.WriteJSON(msg)
+				if err != nil {
+					log.Error("write error:", err)
+					return
+				}
+			case <-done:
 				return
 			}
 		}
 	}()
 
+	// Forward goroutine
 	go func() {
-		for msg := range c.ForwardChan {
-			err := c.Conn.WriteJSON(msg)
-			if err != nil {
-				log.Println("write:", err)
+		defer close(forwardDone)
+		for {
+			select {
+			case msg, ok := <-c.ForwardChan:
+				if !ok {
+					log.Info("ForwardChan closed, stopping forwarder")
+					return
+				}
+				c.Conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+				err := c.Conn.WriteJSON(msg)
+				if err != nil {
+					log.Error("forward write error:", err)
+					return
+				}
+			case <-done:
 				return
 			}
 		}
@@ -387,11 +461,27 @@ func (c *Client) Start(cli *client.Client) (err error) {
 		return err
 	}
 
-	// Wait for the done channel to be closed (when the reader exits)
-	<-done
+	// Wait for any goroutine to signal completion (indicating connection issues)
+	select {
+	case <-done:
+		log.Info("Reader goroutine finished")
+	case <-writerDone:
+		log.Info("Writer goroutine finished")
+	case <-forwardDone:
+		log.Info("Forward goroutine finished")
+	}
 
-	return nil
+	// Clean up - close channels to stop other goroutines
+	close(c.SendChan)
+	close(c.ForwardChan)
+
+	// Wait a bit for goroutines to finish
+	time.Sleep(time.Second)
+
+	log.Info("WebSocket connection closed, exiting")
+	return errors.New("websocket connection closed")
 }
+
 func (c *Client) actions() error {
 	var rawMessages []json.RawMessage
 	if err := c.MachineSendAndWait("actions", map[string]interface{}{}, &rawMessages); err != nil {
