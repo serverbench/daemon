@@ -1,5 +1,25 @@
 #!/bin/bash
 
+# Parse command line arguments
+SAFE_MODE=false
+ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --safe)
+            SAFE_MODE=true
+            shift
+            ;;
+        *)
+            ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Set positional parameters from remaining args
+set -- "${ARGS[@]}"
+
 # Define a reusable function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -52,8 +72,11 @@ if ip6tables --version | grep -q nf; then
 else
   IP6TABLES_BIN="ip6tables-legacy"
 fi
+
 docker rm -f serverbench 2>/dev/null || true
-docker run -d \
+
+# Build docker run command with conditional SKIP_CLEAN env var
+DOCKER_CMD="docker run -d \
   --privileged \
   --cap-add=NET_ADMIN \
   --name serverbench \
@@ -64,12 +87,24 @@ docker run -d \
   -v ./keys:/keys \
   -v serverbench-sshd:/etc \
   -v /proc/1/ns/net:/mnt/host_netns \
-  -e IPTABLES_BIN="$IPTABLES_BIN" \
-  -e IP6TABLES_BIN="$IP6TABLES_BIN" \
-  -e KEY="$1" \
-  -e HOSTNAME="${2:-$(hostname)}" \
+  -e IPTABLES_BIN=\"$IPTABLES_BIN\" \
+  -e IP6TABLES_BIN=\"$IP6TABLES_BIN\" \
+  -e KEY=\"$1\" \
+  -e HOSTNAME=\"${2:-$(hostname)}\""
+
+# Add SKIP_CLEAN environment variable if --safe flag is used
+if [ "$SAFE_MODE" = true ]; then
+    DOCKER_CMD="$DOCKER_CMD \
+  -e SKIP_CLEAN=true"
+    echo "Running in safe mode (SKIP_CLEAN=true)"
+fi
+
+DOCKER_CMD="$DOCKER_CMD \
   --pid=host \
   --network=host \
-  serverbench/daemon
+  serverbench/daemon"
+
+# Execute the docker command
+eval $DOCKER_CMD
 
 echo "serverbench installed"
