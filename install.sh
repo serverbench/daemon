@@ -40,14 +40,14 @@ fi
 # Now run the serverbench container
 echo "Setting up serverbench container..."
 # Detect iptables variant
-if iptables --version | grep -q nft; then
+if iptables --version | grep -q nf; then
   IPTABLES_BIN="iptables"
 else
   IPTABLES_BIN="iptables-legacy"
 fi
 
 # Detect ip6tables variant
-if ip6tables --version | grep -q nft; then
+if ip6tables --version | grep -q nf; then
   IP6TABLES_BIN="ip6tables"
 else
   IP6TABLES_BIN="ip6tables-legacy"
@@ -66,8 +66,8 @@ docker run -d \
   -v /proc/1/ns/net:/mnt/host_netns \
   -e IPTABLES_BIN="$IPTABLES_BIN" \
   -e IP6TABLES_BIN="$IP6TABLES_BIN" \
-  -e KEY="m_sk_JC2UeNEPJ80gv1V7UuT8dZgEHrX8NBwn2aUZCSZDpC81aOTynQrS3GteCR-2Yj1T" \
-  -e HOSTNAME="purevanilla-2" \
+  -e KEY="$1" \
+  -e HOSTNAME="${2:-$(hostname)}" \
   --pid=host \
   --network=host \
   serverbench/daemon
