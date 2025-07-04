@@ -72,10 +72,11 @@ func (c *Container) Pull(cli *client.Client, token string, uri string, branch st
 		return err
 	} else if status == "running" || status == "restarting" {
 		log.Info("stopping container in preparation for pull - container will be restarted when finished")
-		shouldRestart = true
+		err = c.Stop(cli)
 		if err != nil {
 			return err
 		}
+		shouldRestart = true
 	}
 	gitUrl := "https://x-access-token:" + token + "@" + domain + "/" + uri
 	log.Info(gitUrl)
