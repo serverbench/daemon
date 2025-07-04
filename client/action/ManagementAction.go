@@ -20,7 +20,7 @@ func (a *ManagementAction) Process(cli *client.Client) error {
 	switch a.Action {
 	case Update:
 		{
-			return a.Container.Update(
+			return a.State.Update(
 				cli,
 				false,
 			)
