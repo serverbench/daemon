@@ -188,6 +188,7 @@ func (c *Client) containers() (err error) {
 		log.Error("update containers failed", err)
 		return err
 	}
+	log.Info("handling acks")
 	for _, container := range created {
 		var x interface{}
 		err = c.MachineSendAndWait("containers."+container.Id+".postcreate", map[string]interface{}{}, &x)
@@ -196,6 +197,7 @@ func (c *Client) containers() (err error) {
 			return err
 		}
 	}
+	log.Info("requesting git status")
 	for _, container := range c.Machine.Containers {
 		if container.Branch != nil {
 			commit, err := container.GetCommit()
