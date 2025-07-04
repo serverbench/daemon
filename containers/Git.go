@@ -25,7 +25,10 @@ func (c *Container) GetCommit() (commit *string, err error) {
 	if !isRepo {
 		return nil, nil
 	}
-
+	err = c.Whitelist()
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.Command("git", "-C", c.Dir(), "rev-parse", "HEAD")
 
 	var out bytes.Buffer
@@ -51,6 +54,17 @@ func (c *Container) isGitRepository() (isRepo bool, err error) {
 		return false, err
 	}
 	return info.IsDir(), nil
+}
+
+func (c *Container) Whitelist() (err error) {
+	dataPath := c.Dir()
+	log.Info("whitelisting repo")
+	err = exec.Command("git", "config", "--global", "--add", "safe.directory", dataPath).Run()
+	if err != nil {
+		log.Error("error while whitelisting repo")
+		return err
+	}
+	return nil
 }
 
 func (c *Container) Pull(cli *client.Client, token string, uri string, branch string, domain string) (err error) {
@@ -113,10 +127,8 @@ func (c *Container) Pull(cli *client.Client, token string, uri string, branch st
 		isUpdated = true
 	}
 	// clean repo
-	log.Info("whitelisting repo")
-	err = exec.Command("git", "config", "--global", "--add", "safe.directory", dataPath).Run()
+	err = c.Whitelist()
 	if err != nil {
-		log.Error("error while whitelisting repo")
 		return err
 	}
 	log.Info("resetting repo")
