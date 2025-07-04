@@ -185,12 +185,14 @@ func (c *Client) containers() (err error) {
 	}
 	created, err := c.Machine.UpdateContainers(c.Cli, updatedContainers)
 	if err != nil {
+		log.Error("update containers failed", err)
 		return err
 	}
 	for _, container := range created {
 		var x interface{}
 		err = c.MachineSendAndWait("containers."+container.Id+".postcreate", map[string]interface{}{}, &x)
 		if err != nil {
+			log.Error("create container ack failed", err)
 			return err
 		}
 	}
@@ -198,6 +200,7 @@ func (c *Client) containers() (err error) {
 		if container.Branch != nil {
 			commit, err := container.GetCommit()
 			if err != nil {
+				log.Error("get container commit failed", err)
 				return err
 			}
 			ignore := make(map[string]struct{})
@@ -205,6 +208,7 @@ func (c *Client) containers() (err error) {
 			data["commit"] = commit
 			err = c.MachineSendAndWait("containers."+container.Id+".commit", data, &ignore)
 			if err != nil {
+				log.Error("commit container request failed", err)
 				return err
 			}
 		}
