@@ -32,6 +32,7 @@ type Container struct {
 	Envs                 map[string]string `json:"envs"`
 	Ports                []Port            `json:"ports"`
 	Branch               *string           `json:"branch"`
+	Command              *string           `json:"command"`
 	ExpectingFirstCommit bool
 }
 
@@ -305,11 +306,19 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
+	var cmdArgs []string
+	if c.Command != nil {
+		cmdArgs = strings.Fields(*c.Command)
+	} else {
+		// cmdArgs = nil or leave empty
+		cmdArgs = nil
+	}
 	config := &container.Config{
 		Image:        c.Image,
 		ExposedPorts: exposedPorts,
 		Env:          env,
 		User:         perm,
+		Cmd:          cmdArgs,
 	}
 	hostPath, err := c.HostDir(cli)
 	if err != nil {
