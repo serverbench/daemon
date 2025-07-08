@@ -340,12 +340,10 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 	log.Info("creating container")
 	containerPath := c.Dir()
 	envMap, _ := c.LoadEnvMap(containerPath)
-	log.Info("env map 0", envMap)
 	for k, v := range c.Envs {
 		envMap[k] = v
 	}
 	var env []string
-	log.Info("env map 1", envMap)
 	for k, v := range envMap {
 		finalV := v
 		// Iterate through the replacements map and apply them
@@ -357,7 +355,6 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 			finalV = strings.ReplaceAll(finalV, placeholderB, varV)
 		}
 		env = append(env, fmt.Sprintf("%s=%s", k, finalV))
-		log.Info("env: ", k, "=", finalV)
 	}
 	hostPath, err := c.HostDir(cli)
 	if err != nil {
