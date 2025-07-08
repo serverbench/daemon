@@ -351,8 +351,10 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		// Iterate through the replacements map and apply them
 		for varK, varV := range c.Replacements {
 			// Construct the placeholder string to replace, e.g., "${VARIABLE_NAME}"
-			placeholder := fmt.Sprintf("${%s}", varK)
-			finalV = strings.ReplaceAll(finalV, placeholder, varV)
+			placeholderA := fmt.Sprintf("${%s}", varK)
+			placeholderB := fmt.Sprintf("VAR_%s", varK)
+			finalV = strings.ReplaceAll(finalV, placeholderA, varV)
+			finalV = strings.ReplaceAll(finalV, placeholderB, varV)
 		}
 		env = append(env, fmt.Sprintf("%s=%s", k, finalV))
 		log.Info("env: ", k, "=", finalV)
