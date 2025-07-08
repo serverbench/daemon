@@ -25,17 +25,23 @@ func (c *Container) dataDir() string {
 
 // creates users, prepares the necessary directories and mounts them
 func (c *Container) createUser() (err error) {
-	log.Info("creating user")
-	out, err := exec.Command("useradd", "-m", "-d", c.homeDir(), "-G", group, "--shell", "/bin/false", c.Id).CombinedOutput()
+	exists, err := c.userExists()
 	if err != nil {
-		log.Error("error while creating user: ", err, string(out))
 		return err
 	}
-	log.Info("resetting password")
-	_, err = c.ResetPassword()
-	if err != nil {
-		log.Error("error while resetting password: ", err)
-		return err
+	if !exists {
+		log.Info("creating user")
+		out, err := exec.Command("useradd", "-m", "-d", c.homeDir(), "-G", group, "--shell", "/bin/false", c.Id).CombinedOutput()
+		if err != nil {
+			log.Error("error while creating user: ", err, string(out))
+			return err
+		}
+		log.Info("resetting password")
+		_, err = c.ResetPassword()
+		if err != nil {
+			log.Error("error while resetting password: ", err)
+			return err
+		}
 	}
 	err = c.ReadyFs()
 	if err != nil {
