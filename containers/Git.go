@@ -181,6 +181,10 @@ func (c *Container) Pull(cli *client.Client, token string, uri string, branch st
 	if shouldRestart {
 		log.Info("restarting the container to match the initial state before pull")
 		err = c.Start(cli)
+		if err != nil {
+			log.Error("error while restarting container: ", err)
+			return err
+		}
 	}
 	log.Info("finished pulling")
 	return err
