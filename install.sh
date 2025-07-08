@@ -120,6 +120,7 @@ docker run -d \
 --restart=always \
 -v /var/run/docker.sock:/var/run/docker.sock \
 -e WATCHTOWER_LABEL_ENABLE=true \
+-e WATCHTOWER_POLL_INTERVAL=600 \
 containrrr/watchtower
 
 echo "serverbench autoupdate enabled"
