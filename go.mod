@@ -9,6 +9,7 @@ require (
 	github.com/docker/docker v28.1.1+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/joho/godotenv v1.5.1
 	github.com/matoous/go-nanoid/v2 v2.1.0
 	github.com/sethvargo/go-password v0.3.1
 	github.com/shirou/gopsutil/v3 v3.24.5

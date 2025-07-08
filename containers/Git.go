@@ -93,7 +93,6 @@ func (c *Container) Pull(cli *client.Client, token string, uri string, branch st
 		shouldRestart = true
 	}
 	gitUrl := "https://x-access-token:" + token + "@" + domain + "/" + uri
-	log.Info(gitUrl)
 	isUpdated := false
 	dataPath := c.Dir()
 	if c.ExpectingFirstCommit {
@@ -165,6 +164,15 @@ func (c *Container) Pull(cli *client.Client, token string, uri string, branch st
 			log.Info("error while pulling changes: ", err)
 			return err
 		}
+	}
+	// delete container to re-crease, just in case the .env file changed
+	err = c.deleteContainer(cli)
+	if err != nil {
+		return err
+	}
+	err = c.createContainer(cli)
+	if err != nil {
+		return err
 	}
 	err = c.ReadyFs()
 	if err != nil {

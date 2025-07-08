@@ -102,6 +102,9 @@ func (m *Machine) UpdateContainers(cli *client.Client, newContainers []container
 	}
 	for i := range newContainers {
 		provided := &newContainers[i]
+		if len(provided.Replacements) == 0 {
+			panic("replacements is required")
+		}
 		if _, exists := toBeDeleted[provided.Id]; exists {
 			existing = append(existing, *provided)
 			delete(toBeDeleted, provided.Id)

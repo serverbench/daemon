@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"os"
@@ -33,7 +34,39 @@ type Container struct {
 	Ports                []Port            `json:"ports"`
 	Branch               *string           `json:"branch"`
 	Command              *string           `json:"command"`
+	Label                Label             `json:"label"`
 	ExpectingFirstCommit bool
+	Replacements         map[string]string `json:"replacements"`
+}
+
+type Label string
+
+// Type constants
+const (
+	LabelProd    Label = "prod"
+	LabelStaging Label = "staging"
+	LabelTest    Label = "test"
+	LabelDev     Label = "dev"
+)
+
+func (c *Container) EnvFiles() []string {
+	all := []string{".env.dev", ".env.test", ".env.staging", ".env"}
+
+	var start int
+	switch c.Label {
+	case LabelDev:
+		start = 0
+	case LabelTest:
+		start = 1
+	case LabelStaging:
+		start = 2
+	case LabelProd:
+		fallthrough
+	default:
+		start = 3
+	}
+
+	return all[start:]
 }
 
 func (c *Container) PipeLogs(ctx context.Context, cli *client.Client, since int64, until int64, limit int64, listener *pipe.Pipe) (err error) {
@@ -170,7 +203,6 @@ func (c *Container) PipeStatus(ctx context.Context, cli *client.Client, listener
 			if event.Type != "container" || event.Action == "" {
 				continue
 			}
-
 			normalized, ok := pipe.NormalizeDockerStatus[event.Action]
 			if !ok {
 				continue
@@ -178,6 +210,10 @@ func (c *Container) PipeStatus(ctx context.Context, cli *client.Client, listener
 
 			s := pipe.Status{
 				Status: normalized,
+			}
+
+			if event.Action == events.ActionDestroy || event.Action == events.ActionRemove || event.Action == events.ActionDelete {
+				listener.End()
 			}
 
 			select {
@@ -251,6 +287,23 @@ func (c *Container) InstallFirewall() (err error) {
 	return err
 }
 
+func (c *Container) LoadEnvMap(hostPath string) (map[string]string, error) {
+	for _, envFile := range c.EnvFiles() {
+		envPath := filepath.Join(hostPath, envFile)
+
+		if _, err := os.Stat(envPath); err == nil {
+			envMap, err := godotenv.Read(envPath)
+			if err != nil {
+				return make(map[string]string), err
+			}
+			return envMap, nil
+		}
+	}
+
+	// No file found
+	return make(map[string]string), nil
+}
+
 func (c *Container) pullImage(cli *client.Client) (err error) {
 	log.Info("pulling image")
 	out, err := cli.ImagePull(context.Background(), c.Image, image.PullOptions{})
@@ -280,6 +333,27 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		}
 	}
 	log.Info("creating container")
+	hostPath, err := c.HostDir(cli)
+	if err != nil {
+		return err
+	}
+
+	envMap, _ := c.LoadEnvMap(*hostPath)
+	for k, v := range c.Envs {
+		envMap[k] = v
+	}
+	var env []string
+	for k, v := range envMap {
+		finalV := v
+		// Iterate through the replacements map and apply them
+		for varK, varV := range c.Replacements {
+			// Construct the placeholder string to replace, e.g., "${VARIABLE_NAME}"
+			placeholder := fmt.Sprintf("${%s}", varK)
+			finalV = strings.ReplaceAll(finalV, placeholder, varV)
+		}
+		env = append(env, fmt.Sprintf("%s=%s", k, finalV))
+	}
+
 	portBindings := nat.PortMap{}
 	exposedPorts := nat.PortSet{}
 
@@ -295,11 +369,6 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 				},
 			}
 		}
-	}
-
-	var env []string
-	for k, v := range c.Envs {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
 	err, perm := c.PermSnippet()
@@ -319,10 +388,6 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		Env:          env,
 		User:         perm,
 		Cmd:          cmdArgs,
-	}
-	hostPath, err := c.HostDir(cli)
-	if err != nil {
-		return err
 	}
 	hostConfig := &container.HostConfig{
 		PortBindings: portBindings,

@@ -95,6 +95,7 @@ DOCKER_CMD="docker run -d \
   -v ./keys:/keys \
   -v serverbench-sshd:/etc \
   -v /proc/1/ns/net:/mnt/host_netns \
+  -l com.centurylinklabs.watchtower.enable=true \
   -e IPTABLES_BIN=\"$IPTABLES_BIN\" \
   -e IP6TABLES_BIN=\"$IP6TABLES_BIN\" \
   -e KEY=\"$1\" \
@@ -111,3 +112,14 @@ DOCKER_CMD="$DOCKER_CMD --pid=host --network=host serverbench/daemon"
 eval $DOCKER_CMD
 
 echo "serverbench installed"
+
+docker rm -f serverbench-wt 2>/dev/null || true
+
+docker run -d \
+--name serverbench-wt \
+--restart=always \
+-v /var/run/docker.sock:/var/run/docker.sock \
+-e WATCHTOWER_LABEL_ENABLE=true \
+containrrr/watchtower
+
+echo "serverbench autoupdate enabled"
