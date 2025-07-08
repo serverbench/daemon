@@ -288,8 +288,10 @@ func (c *Container) InstallFirewall() (err error) {
 }
 
 func (c *Container) LoadEnvMap(hostPath string) (map[string]string, error) {
-	for _, envFile := range c.EnvFiles() {
+	files := c.EnvFiles()
+	for _, envFile := range files {
 		envPath := filepath.Join(hostPath, envFile)
+		log.Info("loading env file: ", envPath)
 
 		if _, err := os.Stat(envPath); err == nil {
 			envMap, err := godotenv.Read(envPath)
@@ -297,8 +299,11 @@ func (c *Container) LoadEnvMap(hostPath string) (map[string]string, error) {
 				return make(map[string]string), err
 			}
 			return envMap, nil
+		} else {
+			log.Info("unknown env file: ", envPath)
 		}
 	}
+	log.Info("no suitable envs found: ", files)
 
 	// No file found
 	return make(map[string]string), nil
