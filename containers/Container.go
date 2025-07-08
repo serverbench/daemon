@@ -338,12 +338,8 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		}
 	}
 	log.Info("creating container")
-	hostPath, err := c.HostDir(cli)
-	if err != nil {
-		return err
-	}
-
-	envMap, _ := c.LoadEnvMap(*hostPath)
+	hostPath := c.Dir()
+	envMap, _ := c.LoadEnvMap(hostPath)
 	for k, v := range c.Envs {
 		envMap[k] = v
 	}
@@ -399,7 +395,7 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		Mounts: []mount.Mount{
 			{
 				Type:   mount.TypeBind,
-				Source: *hostPath,
+				Source: hostPath,
 				Target: c.Mount,
 			},
 		},
