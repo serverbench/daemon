@@ -351,6 +351,7 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 			// Construct the placeholder string to replace, e.g., "${VARIABLE_NAME}"
 			placeholder := fmt.Sprintf("${%s}", varK)
 			finalV = strings.ReplaceAll(finalV, placeholder, varV)
+			log.Info("placeholder: ", placeholder, " value", varV, " original: ", v, " result: ", finalV)
 		}
 		env = append(env, fmt.Sprintf("%s=%s", k, finalV))
 	}
