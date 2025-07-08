@@ -338,8 +338,8 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		}
 	}
 	log.Info("creating container")
-	hostPath := c.Dir()
-	envMap, _ := c.LoadEnvMap(hostPath)
+	containerPath := c.Dir()
+	envMap, _ := c.LoadEnvMap(containerPath)
 	for k, v := range c.Envs {
 		envMap[k] = v
 	}
@@ -353,6 +353,10 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 			finalV = strings.ReplaceAll(finalV, placeholder, varV)
 		}
 		env = append(env, fmt.Sprintf("%s=%s", k, finalV))
+	}
+	hostPath, err := c.HostDir(cli)
+	if err != nil {
+		return err
 	}
 
 	portBindings := nat.PortMap{}
@@ -395,7 +399,7 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		Mounts: []mount.Mount{
 			{
 				Type:   mount.TypeBind,
-				Source: hostPath,
+				Source: *hostPath,
 				Target: c.Mount,
 			},
 		},
