@@ -1,5 +1,8 @@
 FROM alpine
 
+# Accept build architecture from buildx
+ARG TARGETARCH
+
 # Install dependencies
 RUN apk update && apk add --no-cache tini openssh go shadow iproute2 iptables iptables-legacy ip6tables git rsync
 
@@ -21,7 +24,10 @@ RUN addgroup -S serverbench && \
 # Copy and build app
 COPY . /build
 WORKDIR /build
-RUN go build -o /app/serverbench
+
+# Use architecture-specific GOARCH
+RUN GOOS=linux GOARCH=$TARGETARCH go build -o /app/serverbench
+
 WORKDIR /app
 
 # Entrypoint script to init keys if needed
