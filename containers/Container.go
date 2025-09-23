@@ -5,6 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"supervisor/client/proto/pipe"
+	"supervisor/machine/hardware"
+	"time"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
@@ -14,13 +22,6 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
-	"io"
-	"os"
-	"path/filepath"
-	"strings"
-	"supervisor/client/proto/pipe"
-	"supervisor/machine/hardware"
-	"time"
 )
 
 var unknownContainer = errors.New("unknown container")
@@ -34,6 +35,7 @@ type Container struct {
 	Ports                []Port            `json:"ports"`
 	Branch               *string           `json:"branch"`
 	Command              *string           `json:"command"`
+	Memory               *int64            `json:"memory"`
 	Label                Label             `json:"label"`
 	ExpectingFirstCommit bool
 	Replacements         map[string]string `json:"replacements"`
@@ -408,6 +410,9 @@ func (c *Container) createContainer(cli *client.Client) (err error) {
 		RestartPolicy: container.RestartPolicy{
 			Name: container.RestartPolicyUnlessStopped,
 		},
+	}
+	if c.Memory != nil && *c.Memory > 0 {
+		hostConfig.Memory = *c.Memory
 	}
 	_, err = cli.ContainerCreate(context.Background(), config, hostConfig, nil, nil, c.cName())
 	if err != nil {
