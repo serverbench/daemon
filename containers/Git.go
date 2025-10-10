@@ -3,14 +3,15 @@ package containers
 import (
 	"bytes"
 	"errors"
-	"github.com/docker/docker/client"
-	log "github.com/sirupsen/logrus"
-	"github.com/thanhpk/randstr"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/docker/docker/client"
+	log "github.com/sirupsen/logrus"
+	"github.com/thanhpk/randstr"
 )
 
 func (c *Container) GetCommit() (commit *string, err error) {
@@ -112,7 +113,9 @@ func (c *Container) Pull(cli *client.Client, token string, uri string, branch st
 			return err
 		}
 		log.Info("initializing container")
-		out, err := exec.Command("git", "-C", dataPath, "clone", "-b", branch, gitUrl, ".").CombinedOutput()
+		out, err := exec.Command(
+			"git", "-C", dataPath, "clone", "--depth", "1", "-b", branch, gitUrl, ".",
+		).CombinedOutput()
 		log.Info(string(out))
 		if err != nil {
 			log.Error("error while initializing: ", err)
