@@ -12,5 +12,4 @@ if [ ! -f /keys/ssh_host_rsa_key ]; then
 fi
 
 # Start sshd in background and run app
-/usr/sbin/sshd
 exec /app/serverbench
