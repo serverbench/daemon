@@ -1,8 +1,11 @@
 package main
 
 import (
-	docker "github.com/docker/docker/client"
 	"supervisor/client"
+	"time"
+
+	docker "github.com/docker/docker/client"
+	log "github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -11,12 +14,30 @@ func main() {
 		docker.WithVersion("1.47"),
 	)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer cli.Close()
-	serverbench := client.Client{}
-	err = serverbench.Start(cli)
-	if err != nil {
-		panic(err)
+
+	const (
+		initialBackoff = 5 * time.Second
+		maxBackoff     = 60 * time.Second
+	)
+	backoff := initialBackoff
+
+	for {
+		serverbench := client.Client{}
+		err = serverbench.Start(cli)
+		if err != nil {
+			log.Errorf("daemon error: %v", err)
+			log.Infof("reconnecting in %v...", backoff)
+			time.Sleep(backoff)
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		} else {
+			// Clean exit – reset backoff and reconnect immediately.
+			backoff = initialBackoff
+		}
 	}
 }

@@ -3,6 +3,8 @@ package hardware
 import (
 	"context"
 	"errors"
+	"os"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
@@ -19,7 +21,15 @@ type Storage struct {
 }
 
 func GetHostPath(cli *client.Client) (path *string, err error) {
+	// Allow the host path to be provided directly via an environment variable,
+	// which avoids the Docker self-lookup and is more reliable in some setups.
+	if envPath := os.Getenv("HOST_CONTAINERS_PATH"); envPath != "" {
+		return &envPath, nil
+	}
+
+	// Fall back to discovering the path by inspecting the self container.
 	containers, err := cli.ContainerList(context.Background(), container.ListOptions{
+		All: true, // include stopped containers so a brief stop doesn't cause failure
 		Filters: filters.NewArgs(filters.KeyValuePair{
 			Key:   "name",
 			Value: "^/serverbench$",

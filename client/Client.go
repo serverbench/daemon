@@ -5,10 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/docker/docker/client"
-	"github.com/gorilla/websocket"
-	gonanoid "github.com/matoous/go-nanoid/v2"
-	log "github.com/sirupsen/logrus"
 	"net/url"
 	"os"
 	"supervisor/client/action"
@@ -17,7 +13,13 @@ import (
 	"supervisor/containers"
 	"supervisor/machine"
 	"supervisor/machine/hardware"
+	"sync"
 	"time"
+
+	"github.com/docker/docker/client"
+	"github.com/gorilla/websocket"
+	gonanoid "github.com/matoous/go-nanoid/v2"
+	log "github.com/sirupsen/logrus"
 )
 
 type ListenerContext struct {
@@ -35,10 +37,31 @@ type Client struct {
 	callbacks   map[string]chan proto.Reply
 	pipes       map[string]pipe.Pipe
 
-	// Add connection monitoring fields
+	// Mutex to serialise all WebSocket writes (gorilla/websocket requires this)
+	writeMu sync.Mutex
+
+	// Connection monitoring fields
 	pingInterval time.Duration
 	pongWait     time.Duration
 	writeWait    time.Duration
+}
+
+// writeJSON serialises v to JSON and sends it over the WebSocket connection.
+// It is safe to call from multiple goroutines.
+func (c *Client) writeJSON(v interface{}) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.Conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+	return c.Conn.WriteJSON(v)
+}
+
+// writePing sends a WebSocket ping frame.
+// It is safe to call from multiple goroutines.
+func (c *Client) writePing() error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.Conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+	return c.Conn.WriteMessage(websocket.PingMessage, []byte{})
 }
 
 const responseTimeout = time.Second * 5
@@ -288,8 +311,7 @@ func (c *Client) pingHandler(done chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(c.writeWait))
-			if err := c.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+			if err := c.writePing(); err != nil {
 				log.Error("Failed to send ping:", err)
 				return
 			}
@@ -339,7 +361,6 @@ func (c *Client) Start(cli *client.Client) (err error) {
 	// Create channels for coordinating goroutines
 	done := make(chan struct{})
 	writerDone := make(chan struct{})
-	forwardDone := make(chan struct{})
 
 	// Start ping handler
 	go c.pingHandler(done)
@@ -414,7 +435,8 @@ func (c *Client) Start(cli *client.Client) (err error) {
 		}
 	}()
 
-	// Writer goroutine
+	// Single writer goroutine – handles both SendChan and ForwardChan so that
+	// only one goroutine ever writes to the WebSocket at a time.
 	go func() {
 		defer close(writerDone)
 		for {
@@ -424,31 +446,16 @@ func (c *Client) Start(cli *client.Client) (err error) {
 					log.Info("SendChan closed, stopping writer")
 					return
 				}
-				c.Conn.SetWriteDeadline(time.Now().Add(c.writeWait))
-				err := c.Conn.WriteJSON(msg)
-				if err != nil {
+				if err := c.writeJSON(msg); err != nil {
 					log.Error("write error:", err)
 					return
 				}
-			case <-done:
-				return
-			}
-		}
-	}()
-
-	// Forward goroutine
-	go func() {
-		defer close(forwardDone)
-		for {
-			select {
-			case msg, ok := <-c.ForwardChan:
+			case fwd, ok := <-c.ForwardChan:
 				if !ok {
-					log.Info("ForwardChan closed, stopping forwarder")
+					log.Info("ForwardChan closed, stopping writer")
 					return
 				}
-				c.Conn.SetWriteDeadline(time.Now().Add(c.writeWait))
-				err := c.Conn.WriteJSON(msg)
-				if err != nil {
+				if err := c.writeJSON(fwd); err != nil {
 					log.Error("forward write error:", err)
 					return
 				}
@@ -473,8 +480,6 @@ func (c *Client) Start(cli *client.Client) (err error) {
 		log.Info("Reader goroutine finished")
 	case <-writerDone:
 		log.Info("Writer goroutine finished")
-	case <-forwardDone:
-		log.Info("Forward goroutine finished")
 	}
 
 	// Clean up - close channels to stop other goroutines
