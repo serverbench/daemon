@@ -162,9 +162,10 @@ func (c *Client) handleListener(listener pipe.Pipe) (err error) {
 		case pipe.EventPassword:
 			password, err := selectedContainer.ResetPassword()
 			if err == nil {
-				listener.Forward <- listener.Package(pipe.Password{
-					Password: password,
-				})
+				select {
+				case listener.Forward <- listener.Package(pipe.Password{Password: password}):
+				case <-listener.Context.Done():
+				}
 				listener.End()
 			}
 			break
@@ -176,9 +177,10 @@ func (c *Client) handleListener(listener pipe.Pipe) (err error) {
 			} else {
 				err = selectedContainer.Pull(c.Cli, gitFilter.Token, gitFilter.Uri, gitFilter.Branch, gitFilter.Domain)
 				if err == nil {
-					listener.Forward <- listener.Package(pipe.Git{
-						Deployed: true,
-					})
+					select {
+					case listener.Forward <- listener.Package(pipe.Git{Deployed: true}):
+					case <-listener.Context.Done():
+					}
 				}
 				listener.End()
 			}
@@ -191,6 +193,8 @@ func (c *Client) handleListener(listener pipe.Pipe) (err error) {
 	select {
 	case <-listener.Delete:
 		delete(c.pipes, listener.Lid)
+	case <-listener.Context.Done():
+		// Connection closed before the server sent a Delete; exit to avoid leaking.
 	}
 	if err != nil {
 		log.Error(err)
@@ -238,6 +242,7 @@ func (c *Client) containers() (err error) {
 			}
 		}
 	}
+	log.Info("requested git status")
 	return nil
 }
 
@@ -482,11 +487,18 @@ func (c *Client) Start(cli *client.Client) (err error) {
 		log.Info("Writer goroutine finished")
 	}
 
-	// Clean up - close channels to stop other goroutines
-	close(c.SendChan)
-	close(c.ForwardChan)
+	// Cancel every active pipe context so that handleListener goroutines
+	// (PipeStatus, PipeLogs, …) can exit cleanly via ctx.Done() instead of
+	// blocking or panicking on a closed channel.
+	for _, p := range c.pipes {
+		p.Cancel()
+	}
 
-	// Wait a bit for goroutines to finish
+	// Do NOT close SendChan / ForwardChan here.  The writer goroutine already
+	// exits when <-done fires.  Closing a channel that other goroutines are
+	// still sending to causes "send on closed channel" panics.
+
+	// Give in-flight goroutines a moment to notice the cancellation.
 	time.Sleep(time.Second)
 
 	log.Info("WebSocket connection closed, exiting")

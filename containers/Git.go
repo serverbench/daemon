@@ -65,6 +65,7 @@ func (c *Container) Whitelist() (err error) {
 		log.Error("error while whitelisting repo")
 		return err
 	}
+	log.Info("whitelisted repo")
 	return nil
 }
 

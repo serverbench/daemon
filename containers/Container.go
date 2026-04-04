@@ -123,11 +123,15 @@ func (c *Container) PipeLogs(ctx context.Context, cli *client.Client, since int6
 		if err != nil {
 			continue
 		}
-		listener.Forward <- listener.Package(pipe.Log{
+		select {
+		case listener.Forward <- listener.Package(pipe.Log{
 			Timestamp: timestamp.UnixMilli(),
 			Content:   content,
 			End:       false,
-		})
+		}):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		processed++
 		if limit > 0 && processed >= limit {
 			log.Info("cancelled")
