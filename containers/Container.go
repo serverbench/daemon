@@ -438,7 +438,8 @@ func (c *Container) Stop(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
-	return cli.ContainerStop(ctx, cid, container.StopOptions{})
+	timeout := int(10 * time.Minute / time.Second)
+	return cli.ContainerStop(ctx, cid, container.StopOptions{Timeout: &timeout})
 }
 
 func (c *Container) Restart(cli *client.Client) (err error) {
@@ -448,7 +449,8 @@ func (c *Container) Restart(cli *client.Client) (err error) {
 	if err != nil {
 		return err
 	}
-	return cli.ContainerRestart(ctx, cid, container.StopOptions{})
+	timeout := int(10 * time.Minute / time.Second)
+	return cli.ContainerRestart(ctx, cid, container.StopOptions{Timeout: &timeout})
 }
 
 func (c *Container) Pause(cli *client.Client) (err error) {
